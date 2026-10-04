@@ -87,7 +87,20 @@ function contactInput(r, field, placeholder, type) {
   return input;
 }
 
+function openBadge(r, now) {
+  const status = openStatus(r, now);
+  return el("span", { className: "open open-" + status.state, textContent: status.label });
+}
+
+function weekList(r, now) {
+  if (!r.opening_hours || !r.opening_hours.length) return null;
+  const today = DAY_NAMES_EL[now.getDay()];
+  return el("ul", { className: "hours-week" },
+    ...r.opening_hours.map((line) => el("li", { className: line.startsWith(today) ? "today" : "", textContent: line })));
+}
+
 function card(r) {
+  const now = new Date();
   const phone = phoneOf(r);
   const href = r.website_url && safeHttpUrl(r.website_url);
 
@@ -115,13 +128,15 @@ function card(r) {
       contactInput(r, "manual_phone", "τηλέφωνο (δικό σου)", "text"),
       contactInput(r, "manual_email", "email", "email"),
       el("label", { className: "check" }, checkbox, " Έλεγξα στο Google: δεν έχει website"),
-      contact, notes));
+      contact, notes, ...(weekList(r, now) ? [el("div", {}, el("b", { textContent: "Ωράριο" }), weekList(r, now))] : [])));
   more.addEventListener("click", (e) => e.stopPropagation());
 
   const item = el("article", { className: "card-item s-" + r.contact_status + (r.place_id === selectedId ? " selected" : "") },
     el("div", { className: "card-title" }, el("span", { textContent: r.name }),
       el("span", { className: "badge " + BADGE_CLASS[r.site_status], textContent: SITE_LABELS[r.site_status] })),
     el("div", { className: "card-line" }, stars(r), el("span", { className: "muted", textContent: r.address || "" })),
+    el("div", { className: "card-line" }, openBadge(r, now),
+      el("span", { className: "muted", textContent: todayHours(r, now) })),
     el("div", { className: "card-actions" }, call));
   if (r.manual_email) item.querySelector(".card-actions").append(
     el("a", { href: "mailto:" + r.manual_email, textContent: r.manual_email, className: "card-meta" }));
@@ -139,6 +154,7 @@ function popupFor(r) {
   const body = el("div", { className: "popup" },
     el("b", { textContent: r.name }), stars(r),
     el("span", { className: "badge " + BADGE_CLASS[r.site_status], textContent: SITE_LABELS[r.site_status] }),
+    el("div", {}, openBadge(r, new Date())),
     el("div", { textContent: phoneOf(r) || "χωρίς τηλέφωνο" }));
   if (r.manual_email) body.append(el("div", { textContent: r.manual_email }));
   return body;
@@ -168,9 +184,11 @@ function selectPlace(r, fromMap) {
 
 function visible() {
   const text = $("text-filter").value.trim().toLowerCase();
+  const now = new Date();
   const list = results.filter((r) =>
     (!$("only-no-site").checked || r.site_status !== "has_site") &&
     (!$("only-phone").checked || phoneOf(r)) &&
+    (!$("only-open").checked || openStatus(r, now).state === "open") &&
     (!text || (r.name + " " + (r.address || "")).toLowerCase().includes(text)));
   const sort = $("sort").value;
   const by = { rating: (a, b) => (b.rating || 0) - (a.rating || 0), reviews: (a, b) => (b.rating_count || 0) - (a.rating_count || 0),
@@ -280,7 +298,7 @@ async function init() {
     chip.onclick = () => { $("query").value = c; $("area-name").focus(); };
     return chip;
   }));
-  ["only-no-site", "only-phone", "sort"].forEach((id) => $(id).addEventListener("change", render));
+  ["only-no-site", "only-phone", "only-open", "sort"].forEach((id) => $(id).addEventListener("change", render));
   $("text-filter").addEventListener("input", render);
   $("search-btn").onclick = start;
   $("tab-category").onclick = () => setMode("category");

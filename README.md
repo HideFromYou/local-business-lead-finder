@@ -12,7 +12,7 @@ Finds local businesses (cafes, pharmacies, shops, ...) that have **no website** 
   - **OpenStreetMap** (Nominatim + Overpass): free, can be stored; phone numbers are often missing.
   - **Google Places API (New)**: phone, website, rating and opening hours; shown live and never stored.
 - **Lead classification**: `none` (no website listed), `dead` (DNS/TLS/connection error, timeout, 4xx/5xx), `social_only` (Facebook, Instagram, Linktree, ...), `alive`.
-- **Greek dashboard**, Google-Maps style: search and result cards on the left (rating, website status, phone, your own email/notes), coloured pins on the map on the right. Two modes: one category ("φαρμακεία") or **all businesses** in an area, split automatically where Google caps results. Click-to-call, manual phone/email entry, a "verified: I checked on Google" tick, contact status, filters and sorting.
+- **Greek dashboard**, Google-Maps style: search and result cards on the left (rating, website status, phone, your own email/notes), coloured pins on the map on the right. Two modes: one category ("φαρμακεία") or **all businesses** in an area, split automatically where Google caps results. **Open now / closed** shown on every card (with today's hours and a "only open now" filter), so you know whether it is a good moment to call. Click-to-call, manual phone/email entry, a "verified: I checked on Google" tick, contact status, filters and sorting.
 - **Ambiguous place names** (there are many "Πεύκα" in Greece) show a list of candidates to pick from.
 - **Cost guard** for Google: every request is counted, and a hard monthly limit stops the tool before the free tier ends.
 - **Do-not-call** flag that removes a business from every list.

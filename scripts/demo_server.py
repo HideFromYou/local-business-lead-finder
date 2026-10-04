@@ -36,6 +36,18 @@ FAKE = [
 ]
 
 
+def _hours(open_h, close_h, days=(1, 2, 3, 4, 5, 6)):
+    """Fictional weekday opening hours, in the same shape Google returns."""
+    names = {0: "Κυριακή", 1: "Δευτέρα", 2: "Τρίτη", 3: "Τετάρτη", 4: "Πέμπτη", 5: "Παρασκευή", 6: "Σάββατο"}
+    lines = [f"{names[d]}: {open_h}:00–{close_h}:00" if d in days else f"{names[d]}: Κλειστό" for d in (1, 2, 3, 4, 5, 6, 0)]
+    periods = [{"open": {"day": d, "hour": open_h, "minute": 0}, "close": {"day": d, "hour": close_h, "minute": 0}} for d in days]
+    return lines, periods
+
+
+HOURS = [_hours(8, 21), _hours(9, 15, (1, 2, 3, 4, 5)), _hours(8, 23, (0, 1, 2, 3, 4, 5, 6)), _hours(10, 14),
+         _hours(8, 21), _hours(9, 22, (0, 1, 2, 3, 4, 5, 6)), _hours(8, 15), _hours(17, 21)]
+
+
 class FakeClient:
     """Stands in for GooglePlacesClient: same interface, fictional data, no network."""
 
@@ -52,8 +64,8 @@ class FakeClient:
         self.calls_made = 2
         db.add_usage(self.conn, gp.month_key(), 2)
         places = [
-            gp.GooglePlace(f"demo-{i}", name, addr, phone, site, None, CENTER[0] + dlat, CENTER[1] + dlon,
-                           rating, count, "OPERATIONAL")
+            gp.GooglePlace(f"demo-{i}", name, addr, phone, site, HOURS[i][0], CENTER[0] + dlat, CENTER[1] + dlon,
+                           rating, count, "OPERATIONAL", HOURS[i][1])
             for i, (name, dlat, dlon, phone, site, rating, count, addr) in enumerate(FAKE)
         ]
         return places, False

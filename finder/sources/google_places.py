@@ -41,12 +41,13 @@ class GooglePlace:
     address: str | None
     phone: str | None
     website_url: str | None
-    opening_hours: str | None
+    opening_hours: list[str] | None  # one line per weekday, in Greek ("Δευτέρα: 8:00–21:00")
     lat: float | None
     lon: float | None
     rating: float | None
     rating_count: int | None
     business_status: str | None
+    opening_periods: list[dict] | None = None  # [{"open": {day, hour, minute}, "close": {...}}], day 0 = Sunday
 
 
 def month_key() -> str:
@@ -85,21 +86,31 @@ def lead_status(website_url: str | None) -> str:
     return "social_only" if is_social(url) else "has_site"
 
 
+def _clock(point: dict) -> dict:
+    return {"day": point.get("day", 0), "hour": point.get("hour", 0), "minute": point.get("minute", 0)}
+
+
 def parse_place(p: dict) -> GooglePlace:
     location = p.get("location", {})
-    hours = p.get("regularOpeningHours", {}).get("weekdayDescriptions")
+    opening = p.get("regularOpeningHours", {})
+    hours = opening.get("weekdayDescriptions")
+    periods = [
+        {"open": _clock(per["open"]), "close": _clock(per["close"]) if per.get("close") else None}
+        for per in opening.get("periods", []) if per.get("open")
+    ]
     return GooglePlace(
         place_id=p["id"],
         name=p.get("displayName", {}).get("text", ""),
         address=p.get("formattedAddress"),
         phone=p.get("nationalPhoneNumber"),
         website_url=p.get("websiteUri"),
-        opening_hours="; ".join(hours) if hours else None,
+        opening_hours=hours or None,
         lat=location.get("latitude"),
         lon=location.get("longitude"),
         rating=p.get("rating"),
         rating_count=p.get("userRatingCount"),
         business_status=p.get("businessStatus"),
+        opening_periods=periods or None,
     )
 
 

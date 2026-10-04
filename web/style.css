@@ -166,3 +166,11 @@ body.maps footer { margin-top: auto; padding: 12px 16px; font-size: 11px; }
 [hidden] { display: none !important; }
 .side-head { flex-direction: column; align-items: flex-start; gap: 2px; }
 .side-head h1 { font-size: 20px; white-space: nowrap; }
+
+.open { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.open.open-open { background: #d3f9d8; color: #1b6b2a; }
+.open.open-closed { background: #fde2e2; color: #9b1c1c; }
+.open.open-gone { background: #e5e7eb; color: #374151; text-decoration: line-through; }
+.open.open-unknown { background: var(--bg); color: var(--muted); font-weight: 400; }
+.hours-week { margin: 0; padding-left: 16px; font-size: 12px; color: var(--muted); }
+.hours-week li.today { color: var(--text); font-weight: 600; }

@@ -209,3 +209,17 @@ def test_all_mode_endpoint_uses_adaptive_and_budget(api, monkeypatch):
     r = api.post("/api/google/search", json={"query": "καταστήματα", "area": AREA, "mode": "all", "max_calls": 15}).json()
     assert len(r["results"]) == 2 and r["calls_used_now"] == 1 and r["stop_reason"] == ""
     assert api.post("/api/google/search", json={"query": "καταστήματα", "area": AREA, "mode": "all", "max_calls": 1000}).status_code == 422
+
+
+def test_parse_place_keeps_weekday_lines_and_periods():
+    raw = place(1, regularOpeningHours={
+        "openNow": True,
+        "periods": [{"open": {"day": 1, "hour": 8, "minute": 0}, "close": {"day": 1, "hour": 21, "minute": 0}},
+                    {"open": {"day": 0, "hour": 0, "minute": 0}}],
+        "weekdayDescriptions": ["Δευτέρα: 8:00 π.μ.–9:00 μ.μ."],
+    })
+    parsed = gp.parse_place(raw)
+    assert parsed.opening_hours == ["Δευτέρα: 8:00 π.μ.–9:00 μ.μ."]
+    assert parsed.opening_periods[0] == {"open": {"day": 1, "hour": 8, "minute": 0}, "close": {"day": 1, "hour": 21, "minute": 0}}
+    assert parsed.opening_periods[1]["close"] is None
+    assert gp.parse_place(place(2)).opening_periods is None
