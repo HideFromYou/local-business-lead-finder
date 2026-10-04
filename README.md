@@ -1,4 +1,4 @@
-# eyedoor
+# local-business-lead-finder
 
 Finds local businesses with no website or a dead website. See CLAUDE.md.
 
