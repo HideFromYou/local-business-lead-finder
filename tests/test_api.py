@@ -70,3 +70,21 @@ def test_csv_export_escapes_formulas(client):
 
 def test_csv_safe():
     assert csv_safe("=1+1") == "'=1+1" and csv_safe(None) == "" and csv_safe("ok") == "ok"
+
+
+def test_manual_phone_and_verified(client):
+    b = client.get("/api/businesses", params={"area": "Καλαμαριά"}).json()[0]
+    assert client.get("/api/businesses", params={"has_phone": True, "area": "Καλαμαριά"}).json() == []
+    client.patch(f"/api/businesses/{b['id']}", json={"manual_phone": " 2310 111111 ", "no_site_verified": True})
+    row = client.get("/api/businesses", params={"has_phone": True, "verified": True}).json()[0]
+    assert (row["manual_phone"], row["no_site_verified"]) == ("2310 111111", 1)
+    client.patch(f"/api/businesses/{b['id']}", json={"manual_phone": "  "})  # blank clears it
+    assert client.get("/api/businesses", params={"area": "Καλαμαριά", "has_phone": True}).json() == []
+
+
+def test_sort_by_name_descending_and_unknown_sort_ignored(client):
+    asc = [b["name"] for b in client.get("/api/businesses", params={"sort": "name"}).json()]
+    desc = [b["name"] for b in client.get("/api/businesses", params={"sort": "name", "desc": True}).json()]
+    assert desc == asc[::-1]
+    assert client.get("/api/businesses", params={"sort": "name; DROP TABLE businesses"}).status_code == 200
+    assert len(client.get("/api/businesses").json()) == 3

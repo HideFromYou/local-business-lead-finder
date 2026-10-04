@@ -7,10 +7,15 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header>
-    <h1>Επιχειρήσεις χωρίς site</h1>
-    <span id="count"></span>
+  <header class="top">
+    <div>
+      <h1>Lead Finder</h1>
+      <p class="sub">Επιχειρήσεις χωρίς site ή με νεκρό site</p>
+    </div>
+    <a id="export" class="button secondary" href="#">Εξαγωγή CSV</a>
   </header>
+
+  <section class="stats" id="stats"></section>
 
   <section class="filters">
     <label>Περιοχή <select id="area"><option value="">Όλες</option></select></label>
@@ -35,22 +40,31 @@
         <option value="do_not_call">Να μην καλεστεί</option>
       </select>
     </label>
-    <label>Αναζήτηση <input id="q" type="search" placeholder="όνομα, διεύθυνση, τηλέφωνο"></label>
-    <label class="check"><input id="leads_only" type="checkbox" checked> Μόνο leads</label>
-    <a id="export" class="button" href="#">Εξαγωγή CSV</a>
+    <label class="grow">Αναζήτηση <input id="q" type="search" placeholder="όνομα, διεύθυνση, τηλέφωνο"></label>
+    <div class="toggles">
+      <label class="check"><input id="leads_only" type="checkbox" checked> Μόνο leads</label>
+      <label class="check"><input id="has_phone" type="checkbox"> Μόνο με τηλέφωνο</label>
+      <label class="check"><input id="verified" type="checkbox"> Μόνο επιβεβαιωμένοι</label>
+    </div>
   </section>
 
   <div class="table-wrap">
     <table>
       <thead>
         <tr>
-          <th>Επιχείρηση</th><th>Τηλέφωνο</th><th>Διεύθυνση</th><th>Ωράριο</th>
-          <th>Site</th><th>Έλεγχος</th><th>Επαφή</th><th>Σημειώσεις</th>
+          <th data-sort="name">Επιχείρηση</th>
+          <th data-sort="phone">Τηλέφωνο</th>
+          <th>Διεύθυνση</th>
+          <th>Ωράριο</th>
+          <th data-sort="site_status">Site</th>
+          <th data-sort="verified" title="Έλεγξα στο Google ότι δεν έχει site">Επιβεβαίωση</th>
+          <th data-sort="contact_status">Επαφή</th>
+          <th>Σημειώσεις</th>
         </tr>
       </thead>
       <tbody id="rows"></tbody>
     </table>
-    <p id="empty" hidden>Δεν βρέθηκαν επιχειρήσεις. Τρέξε πρώτα ένα scan από το terminal.</p>
+    <p id="empty" hidden>Δεν βρέθηκαν επιχειρήσεις με αυτά τα φίλτρα.</p>
   </div>
 
   <footer>© OpenStreetMap contributors</footer>

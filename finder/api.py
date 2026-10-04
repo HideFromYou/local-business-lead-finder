@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import db
 
@@ -20,7 +20,8 @@ SiteStatus = Literal["unchecked", "none", "dead", "social_only", "alive"]
 ContactStatus = Literal["new", "called", "interested", "not_interested", "do_not_call"]
 
 CSV_COLUMNS = ["name", "category", "area", "phone", "address", "opening_hours", "website_url",
-               "site_status", "http_status", "check_error", "contact_status", "notes", "lat", "lon"]
+               "manual_phone", "site_status", "no_site_verified", "http_status", "check_error", "contact_status",
+               "notes", "lat", "lon"]
 
 
 def get_conn():
@@ -34,14 +35,18 @@ def get_conn():
 class Filters:
     def __init__(self, area: str | None = None, category: str | None = None,
                  site_status: SiteStatus | None = None, contact_status: ContactStatus | None = None,
-                 q: str | None = None, leads_only: bool = False):
+                 q: str | None = None, leads_only: bool = False, has_phone: bool = False,
+                 verified: bool = False, sort: str | None = None, desc: bool = False):
         self.kwargs = dict(area=area or None, category=category or None, site_status=site_status,
-                           contact_status=contact_status, search=q or None, leads_only=leads_only)
+                           contact_status=contact_status, search=q or None, leads_only=leads_only,
+                           has_phone=has_phone, verified=verified, sort=sort, descending=desc)
 
 
 class ContactUpdate(BaseModel):
     notes: str | None = None
     contact_status: ContactStatus | None = None
+    manual_phone: str | None = Field(default=None, max_length=40)
+    no_site_verified: bool | None = None
 
 
 @app.get("/api/filters")
@@ -57,7 +62,9 @@ def businesses(f: Filters = Depends(), conn=Depends(get_conn)):
 @app.patch("/api/businesses/{business_id}")
 def update_business(business_id: int, body: ContactUpdate, conn=Depends(get_conn)):
     with conn:
-        found = db.update_contact(conn, business_id, body.notes, body.contact_status)
+        found = db.update_contact(
+            conn, business_id, body.notes, body.contact_status, body.manual_phone, body.no_site_verified
+        )
     if not found:
         raise HTTPException(404, "Business not found")
     return {"ok": True}

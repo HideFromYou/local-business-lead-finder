@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS businesses (
     contact_status TEXT NOT NULL DEFAULT 'new'
         CHECK (contact_status IN ('new','called','interested','not_interested','do_not_call')),
     notes TEXT,
+    manual_phone TEXT,
+    no_site_verified INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE (source, source_id)
@@ -54,7 +56,23 @@ def connect(path: str | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(path or os.getenv("DB_PATH", "site_finder.db"))
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    migrate(conn)
     return conn
+
+
+NEW_COLUMNS = {
+    "manual_phone": "TEXT",
+    "no_site_verified": "INTEGER NOT NULL DEFAULT 0",
+}
+
+
+def migrate(conn: sqlite3.Connection) -> None:
+    """Add columns introduced after a database was first created."""
+    existing = {r["name"] for r in conn.execute("PRAGMA table_info(businesses)")}
+    for column, definition in NEW_COLUMNS.items():
+        if column not in existing:
+            conn.execute(f"ALTER TABLE businesses ADD COLUMN {column} {definition}")
+    conn.commit()
 
 
 def initial_status(website_url: str | None) -> str:
@@ -116,11 +134,23 @@ def save_scan(conn: sqlite3.Connection, area: str, category: str, source: str,
 
 
 LEAD_STATUSES = ("none", "dead", "social_only")
+SORT_COLUMNS = {
+    "name": "name COLLATE NOCASE",
+    "area": "area COLLATE NOCASE",
+    "category": "category",
+    "site_status": "site_status",
+    "contact_status": "contact_status",
+    "phone": "COALESCE(NULLIF(manual_phone, ''), NULLIF(phone, ''))",
+    "verified": "no_site_verified",
+}
+HAS_PHONE_SQL = "COALESCE(NULLIF(manual_phone, ''), NULLIF(phone, '')) IS NOT NULL"
 
 
 def list_businesses(conn: sqlite3.Connection, area: str | None = None, category: str | None = None,
                     site_status: str | None = None, contact_status: str | None = None,
                     search: str | None = None, leads_only: bool = False,
+                    has_phone: bool = False, verified: bool = False,
+                    sort: str | None = None, descending: bool = False,
                     include_do_not_call: bool = False) -> list[sqlite3.Row]:
     """do_not_call rows are hidden unless asked for explicitly."""
     where, params = [], []
@@ -134,14 +164,22 @@ def list_businesses(conn: sqlite3.Connection, area: str | None = None, category:
         where.append("contact_status = ?"); params.append(contact_status)
     if leads_only:
         where.append(f"site_status IN ({', '.join('?' for _ in LEAD_STATUSES)})"); params.extend(LEAD_STATUSES)
+    if has_phone:
+        where.append(HAS_PHONE_SQL)
+    if verified:
+        where.append("no_site_verified = 1")
     if search:
-        where.append("(name LIKE ? OR address LIKE ? OR phone LIKE ?)"); params.extend([f"%{search}%"] * 3)
+        where.append("(name LIKE ? OR address LIKE ? OR phone LIKE ? OR manual_phone LIKE ?)")
+        params.extend([f"%{search}%"] * 4)
     if not include_do_not_call and contact_status != "do_not_call":
         where.append("contact_status != 'do_not_call'")
     sql = "SELECT * FROM businesses"
     if where:
         sql += " WHERE " + " AND ".join(where)
-    return conn.execute(sql + " ORDER BY area, category, name", params).fetchall()
+    order = "area, category, name"
+    if sort in SORT_COLUMNS:  # whitelist: never put user input into SQL
+        order = f"{SORT_COLUMNS[sort]} {'DESC' if descending else 'ASC'}, name COLLATE NOCASE"
+    return conn.execute(f"{sql} ORDER BY {order}", params).fetchall()
 
 
 def distinct_values(conn: sqlite3.Connection, column: str) -> list[str]:
@@ -150,14 +188,19 @@ def distinct_values(conn: sqlite3.Connection, column: str) -> list[str]:
     return [r[0] for r in rows]
 
 
-def update_contact(conn: sqlite3.Connection, business_id: int, notes: str | None,
-                   contact_status: str | None) -> bool:
+def update_contact(conn: sqlite3.Connection, business_id: int, notes: str | None = None,
+                   contact_status: str | None = None, manual_phone: str | None = None,
+                   no_site_verified: bool | None = None) -> bool:
     """Update only the fields that are given. Returns False if the business doesn't exist."""
     updates = {}
     if notes is not None:
         updates["notes"] = notes
     if contact_status is not None:
         updates["contact_status"] = contact_status
+    if manual_phone is not None:
+        updates["manual_phone"] = manual_phone.strip() or None
+    if no_site_verified is not None:
+        updates["no_site_verified"] = int(no_site_verified)
     if updates:
         updates["updated_at"] = now()
         assignments = ", ".join(f"{k} = ?" for k in updates)

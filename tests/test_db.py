@@ -70,3 +70,13 @@ def test_do_not_call_hidden_from_list(conn):
     assert [r["name"] for r in db.list_businesses(conn)] == ["B"]
     assert len(db.list_businesses(conn, include_do_not_call=True)) == 2
     assert db.list_businesses(conn, site_status="none")[0]["name"] == "B"
+
+
+def test_migration_adds_new_columns_to_old_database(tmp_path):
+    import sqlite3
+    path = str(tmp_path / "old.db")
+    old = sqlite3.connect(path)
+    old.execute("CREATE TABLE businesses (id INTEGER PRIMARY KEY, source TEXT, source_id TEXT)")
+    old.commit(); old.close()
+    cols = {r["name"] for r in db.connect(path).execute("PRAGMA table_info(businesses)")}
+    assert {"manual_phone", "no_site_verified"} <= cols
