@@ -8,6 +8,13 @@ const SELECT_FILTERS = ["area", "category", "site_status", "contact_status"];
 const CHECK_FILTERS = ["leads_only", "has_phone", "verified"];
 const $ = (id) => document.getElementById(id);
 
+const CATEGORY_LABELS = {
+  cafe: "Καφέ", restaurant: "Εστιατόριο", fast_food: "Fast food", bar: "Μπαρ", pharmacy: "Φαρμακείο",
+  bakery: "Αρτοποιείο", butcher: "Κρεοπωλείο", supermarket: "Σούπερ μάρκετ", clothes: "Ρούχα",
+  hairdresser: "Κομμωτήριο", beauty: "Αισθητική", florist: "Ανθοπωλείο", bookstore: "Βιβλιοπωλείο",
+  electronics: "Ηλεκτρονικά", car_repair: "Συνεργείο", dentist: "Οδοντίατρος",
+};
+
 let sort = { key: null, desc: false };
 
 function el(tag, props = {}, ...children) {
@@ -135,13 +142,111 @@ async function load() {
   });
 }
 
+// ---- new area scan (OpenStreetMap) ----
+let chosenArea = null;
+
+async function api(url, options) {
+  const res = await fetch(url, options);
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(typeof detail.detail === "string" ? detail.detail : `Σφάλμα ${res.status}`);
+  }
+  return res.json();
+}
+
+const setStatus = (text) => { $("scan-status").textContent = text; };
+
+async function resolveArea() {
+  const name = $("scan-name").value.trim();
+  if (name.length < 2) { setStatus("Γράψε το όνομα της περιοχής."); return; }
+  $("resolve-btn").disabled = true;
+  setStatus("Αναζήτηση...");
+  $("scan-categories").hidden = true;
+  chosenArea = null;
+  try {
+    const params = new URLSearchParams({ name });
+    if ($("scan-hint").value.trim()) params.set("hint", $("scan-hint").value.trim());
+    const areas = await api("/api/resolve?" + params);
+    if (!areas.length) { $("candidates").replaceChildren(); setStatus("Δεν βρέθηκε περιοχή. Δοκίμασε άλλο όνομα ή αφαίρεσε το φίλτρο."); return; }
+    $("candidates").replaceChildren(...areas.map((a, i) => {
+      const radio = el("input", { type: "radio", name: "candidate", checked: areas.length === 1 });
+      radio.onchange = () => pickArea({ ...a, name });
+      if (areas.length === 1) pickArea({ ...a, name });
+      return el("label", { className: "candidate" }, radio,
+        el("span", {}, a.display_name, el("small", { textContent: ` (${a.has_boundary ? "με όρια" : "σημείο, ακτίνα " + $("scan-radius").value + " m"})` })));
+    }));
+    setStatus(areas.length > 1 ? "Βρέθηκαν πολλές περιοχές. Διάλεξε τη σωστή." : "");
+  } catch (e) { setStatus(e.message); } finally { $("resolve-btn").disabled = false; }
+}
+
+function pickArea(area) {
+  chosenArea = area;
+  $("scan-categories").hidden = false;
+  setStatus("");
+}
+
+async function runScan() {
+  const categories = [...document.querySelectorAll("#category-boxes input:checked")].map((i) => i.value);
+  if (!chosenArea || !categories.length) { setStatus("Διάλεξε περιοχή και τουλάχιστον μία κατηγορία."); return; }
+  const { name, display_name, osm_type, osm_id, lat, lon, place_type } = chosenArea;
+  const radius = Number($("scan-radius").value) || 1500;
+  $("scan-btn").disabled = true;
+  let total = 0, fresh = 0;
+  try {
+    for (const [i, category] of categories.entries()) {
+      setStatus(`(${i + 1}/${categories.length}) ${CATEGORY_LABELS[category] || category}...`);
+      const r = await api("/api/scan", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ area: { name, display_name, osm_type, osm_id, lat, lon, place_type }, category, radius }),
+      });
+      total += r.found; fresh += r.new;
+    }
+    setStatus(`Έτοιμο: ${total} επιχειρήσεις, ${fresh} νέες. Πάτα «Έλεγχος sites» για όσες έχουν website.`);
+    await refreshFilters();
+    load();
+  } catch (e) { setStatus("Σταμάτησε: " + e.message); } finally { $("scan-btn").disabled = false; }
+}
+
+async function runChecks() {
+  const { pending } = await api("/api/check/pending");
+  if (!pending) { alert("Δεν υπάρχουν sites προς έλεγχο."); return; }
+  if (pending > 20 && !confirm(`Θα σταλούν αιτήματα σε ${pending} sites. Συνέχεια;`)) return;
+  $("check-btn").disabled = true;
+  $("check-btn").textContent = `Έλεγχος ${pending} sites...`;
+  try {
+    const r = await api("/api/check", { method: "POST" });
+    alert(`Ελέγχθηκαν ${r.checked}: ${r.alive || 0} ζωντανά, ${r.dead || 0} νεκρά, ${r.social_only || 0} μόνο social.`);
+    load();
+  } catch (e) { alert(e.message); } finally {
+    $("check-btn").disabled = false; $("check-btn").textContent = "Έλεγχος sites";
+  }
+}
+
+async function refreshFilters() {
+  const f = await api("/api/filters");
+  for (const [id, values] of [["area", f.areas], ["category", f.categories]]) {
+    const select = $(id), current = select.value;
+    select.replaceChildren(el("option", { value: "", textContent: "Όλες" }),
+      ...values.map((v) => el("option", { value: v, textContent: v })));
+    select.value = current;
+  }
+}
+
 let timer;
 const debounced = () => { clearTimeout(timer); timer = setTimeout(load, 250); };
 
 async function init() {
-  const f = await (await fetch("/api/filters")).json();
-  f.areas.forEach((a) => $("area").append(el("option", { value: a, textContent: a })));
-  f.categories.forEach((c) => $("category").append(el("option", { value: c, textContent: c })));
+  await refreshFilters();
+  const categories = await api("/api/categories");
+  $("category-boxes").replaceChildren(...categories.map((c) =>
+    el("label", {}, el("input", { type: "checkbox", value: c, checked: c === "cafe" }), CATEGORY_LABELS[c] || c)));
+  const setAll = (on) => document.querySelectorAll("#category-boxes input").forEach((i) => { i.checked = on; });
+  $("cat-all").onclick = () => setAll(true);
+  $("cat-none").onclick = () => setAll(false);
+  $("resolve-btn").onclick = resolveArea;
+  $("scan-name").addEventListener("keydown", (e) => { if (e.key === "Enter") resolveArea(); });
+  $("scan-btn").onclick = runScan;
+  $("check-btn").onclick = runChecks;
   SELECT_FILTERS.concat(CHECK_FILTERS).forEach((id) => $(id).addEventListener("change", load));
   $("q").addEventListener("input", debounced);
   document.querySelectorAll("th[data-sort]").forEach((th) => {

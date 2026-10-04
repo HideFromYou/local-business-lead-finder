@@ -88,3 +88,53 @@ def test_sort_by_name_descending_and_unknown_sort_ignored(client):
     assert desc == asc[::-1]
     assert client.get("/api/businesses", params={"sort": "name; DROP TABLE businesses"}).status_code == 200
     assert len(client.get("/api/businesses").json()) == 3
+
+
+AREA = {"name": "Πεύκα", "display_name": "x", "osm_type": "node", "osm_id": 1, "lat": 40.6, "lon": 22.9, "place_type": "suburb"}
+
+
+def test_resolve_returns_candidates(client, monkeypatch):
+    from finder import api
+    from finder.sources.base import Area
+    monkeypatch.setattr(api, "resolve_areas", lambda name, hint=None: [Area(name, "Πεύκα, Θεσσαλονίκη", "node", 1, 1.0, 2.0, "suburb")])
+    data = client.get("/api/resolve", params={"name": "Πεύκα", "hint": "Θεσσαλονίκη"}).json()
+    assert data[0]["display_name"] == "Πεύκα, Θεσσαλονίκη" and data[0]["has_boundary"] is False
+    assert client.get("/api/resolve", params={"name": "a"}).status_code == 422
+
+
+def test_scan_saves_businesses(client, monkeypatch):
+    from finder import api
+    class FakeSource:
+        def __init__(self, radius): pass
+        def search(self, area, category):
+            return [Business("osm", "node/50", "Νέο Καφέ", category, area.name)]
+    monkeypatch.setattr(api, "OsmSource", FakeSource)
+    r = client.post("/api/scan", json={"area": AREA, "category": "cafe", "radius": 1000})
+    assert r.json() == {"category": "cafe", "found": 1, "new": 1, "updated": 0, "unchanged": 0}
+    assert "Νέο Καφέ" in names(client.get("/api/businesses"))
+
+
+def test_scan_validates_input_and_reports_overpass_errors(client, monkeypatch):
+    import httpx
+    from finder import api
+    assert client.post("/api/scan", json={"area": AREA, "category": "shop=evil"}).status_code == 422
+    assert client.post("/api/scan", json={"area": AREA, "category": "cafe", "radius": 999999}).status_code == 422
+    class Boom:
+        def __init__(self, radius): pass
+        def search(self, area, category): raise httpx.ConnectError("down")
+    monkeypatch.setattr(api, "OsmSource", Boom)
+    assert client.post("/api/scan", json={"area": AREA, "category": "cafe"}).status_code == 502
+
+
+def test_check_endpoint_updates_status(client, monkeypatch):
+    from finder import api
+    from finder.checker import CheckResult
+    async def fake_check_many(urls, concurrency=5):
+        return {k: CheckResult("dead", None, "ConnectError") for k in urls}
+    monkeypatch.setattr(api, "check_many", fake_check_many)
+    assert client.get("/api/check/pending").json() == {"pending": 0}  # fixture site is already 'alive'
+    conn = db.connect()
+    conn.execute("UPDATE businesses SET site_status='unchecked' WHERE website_url IS NOT NULL"); conn.commit(); conn.close()
+    assert client.get("/api/check/pending").json() == {"pending": 1}
+    assert client.post("/api/check").json() == {"checked": 1, "dead": 1}
+    assert client.get("/api/businesses", params={"site_status": "dead"}).json()[0]["check_error"] == "ConnectError"

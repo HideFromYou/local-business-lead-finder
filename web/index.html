@@ -12,8 +12,32 @@
       <h1>Lead Finder</h1>
       <p class="sub">Επιχειρήσεις χωρίς site ή με νεκρό site</p>
     </div>
-    <a id="export" class="button secondary" href="#">Εξαγωγή CSV</a>
+    <div class="actions">
+      <button id="check-btn" class="button secondary">Έλεγχος sites</button>
+      <a id="export" class="button secondary" href="#">Εξαγωγή CSV</a>
+    </div>
   </header>
+
+  <details class="scan" id="scan-panel">
+    <summary>Νέα αναζήτηση περιοχής</summary>
+    <div class="scan-body">
+      <div class="scan-row">
+        <label class="grow">Περιοχή <input id="scan-name" type="text" placeholder="π.χ. Πεύκα"></label>
+        <label>Φίλτρο (προαιρετικό) <input id="scan-hint" type="text" placeholder="π.χ. Θεσσαλονίκη"></label>
+        <label>Ακτίνα (m) <input id="scan-radius" type="number" min="100" max="5000" step="100" value="1500"></label>
+        <button id="resolve-btn" class="button">Εύρεση περιοχής</button>
+      </div>
+      <div id="candidates"></div>
+      <div id="scan-categories" hidden>
+        <p class="hint">Κατηγορίες:
+          <button id="cat-all" type="button" class="link">όλες</button> ·
+          <button id="cat-none" type="button" class="link">καμία</button></p>
+        <div id="category-boxes" class="category-boxes"></div>
+        <button id="scan-btn" class="button">Σάρωση</button>
+      </div>
+      <p id="scan-status" class="hint" role="status"></p>
+    </div>
+  </details>
 
   <section class="stats" id="stats"></section>
 
