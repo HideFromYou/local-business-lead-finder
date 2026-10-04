@@ -71,3 +71,9 @@ def test_always_open_has_no_closing_time():
 def test_unknown_and_permanently_closed():
     assert run({}, (2026, 10, 5, 12, 0))["status"]["state"] == "unknown"
     assert run({**MON_SAT, "business_status": "CLOSED_PERMANENTLY"}, (2026, 10, 5, 12, 0))["status"]["state"] == "gone"
+
+
+def test_old_server_string_format_does_not_break_the_page():
+    old = {"opening_hours": "Δευτέρα: 8:00–21:00; Τρίτη: 8:00–21:00", "opening_periods": None}
+    r = run(old, (2026, 10, 5, 12, 0))
+    assert r["today"] == "8:00–21:00" and r["status"]["state"] == "unknown"

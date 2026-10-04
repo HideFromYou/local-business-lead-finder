@@ -93,10 +93,11 @@ function openBadge(r, now) {
 }
 
 function weekList(r, now) {
-  if (!r.opening_hours || !r.opening_hours.length) return null;
+  const lines = hoursLines(r);
+  if (!lines.length) return null;
   const today = DAY_NAMES_EL[now.getDay()];
   return el("ul", { className: "hours-week" },
-    ...r.opening_hours.map((line) => el("li", { className: line.startsWith(today) ? "today" : "", textContent: line })));
+    ...lines.map((line) => el("li", { className: line.startsWith(today) ? "today" : "", textContent: line })));
 }
 
 function card(r) {

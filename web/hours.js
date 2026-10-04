@@ -45,11 +45,18 @@ function openStatus(place, now = new Date()) {
   return { state: "closed", label: `Κλειστό · ανοίγει ${when} ${clock(next.period.open)}` };
 }
 
+// Weekday lines as a list. An older server sent one "; "-joined string, so accept both.
+function hoursLines(place) {
+  const raw = place.opening_hours;
+  if (Array.isArray(raw)) return raw;
+  return typeof raw === "string" && raw ? raw.split("; ") : [];
+}
+
 // "8:00 π.μ.–9:00 μ.μ." for today, taken from Google's own weekday lines.
 function todayHours(place, now = new Date()) {
   const name = DAY_NAMES_EL[now.getDay()];
-  const line = (place.opening_hours || []).find((l) => l.startsWith(name));
+  const line = hoursLines(place).find((l) => l.startsWith(name));
   return line ? line.slice(line.indexOf(":") + 1).trim() : "";
 }
 
-if (typeof module !== "undefined") module.exports = { openStatus, todayHours };
+if (typeof module !== "undefined") module.exports = { openStatus, todayHours, hoursLines };
