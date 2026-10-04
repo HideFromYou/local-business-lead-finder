@@ -1,4 +1,4 @@
-# local-business-lead-finder
+# Web Presence Scanner
 
 Finds local businesses (cafes, pharmacies, shops, ...) that have **no website** or a **dead website**, so a freelance web developer can phone them and offer to build one. It turns public map data into a call list.
 
@@ -12,7 +12,7 @@ Finds local businesses (cafes, pharmacies, shops, ...) that have **no website** 
   - **OpenStreetMap** (Nominatim + Overpass): free, can be stored; phone numbers are often missing.
   - **Google Places API (New)**: phone, website, rating and opening hours; shown live and never stored.
 - **Lead classification**: `none` (no website listed), `dead` (DNS/TLS/connection error, timeout, 4xx/5xx), `social_only` (Facebook, Instagram, Linktree, ...), `alive`.
-- **Greek dashboard**, Google-Maps style: results on the left, map on the right. Filters, call notes, contact status, click-to-call, manual phone entry, a "verified: I checked on Google" tick, CSV export (OSM data).
+- **Greek dashboard**, Google-Maps style: search and result cards on the left (rating, website status, phone, your own email/notes), coloured pins on the map on the right. Two modes: one category ("φαρμακεία") or **all businesses** in an area, split automatically where Google caps results. Click-to-call, manual phone/email entry, a "verified: I checked on Google" tick, contact status, filters and sorting.
 - **Ambiguous place names** (there are many "Πεύκα" in Greece) show a list of candidates to pick from.
 - **Cost guard** for Google: every request is counted, and a hard monthly limit stops the tool before the free tier ends.
 - **Do-not-call** flag that removes a business from every list.
@@ -32,7 +32,7 @@ finder/
   db.py             schema, migrations, queries
   api.py            FastAPI app (JSON API + serves web/)
   cli.py            scan / check / list / serve
-web/                dashboard (index.html = OSM list, google.html = Google + map)
+web/                dashboard (google.html = main page with the map, index.html = older OSM table)
 scripts/            demo_server.py (fictional data)
 tests/
 ```
@@ -59,7 +59,7 @@ python -m finder.cli list --status none
 python -m finder.cli serve --port 8765
 ```
 
-Open `http://127.0.0.1:8765/` (OSM list) or `http://127.0.0.1:8765/google` (Google search with map).
+Open `http://127.0.0.1:8765/`: Google search with the map. (The older OpenStreetMap table is at `/osm`.)
 
 ### Google Places (optional)
 
@@ -75,7 +75,7 @@ Google's terms do not allow a permanent copy of their data, so only the `place_i
 python scripts/demo_server.py
 ```
 
-Opens a server with fictional businesses and no network calls to Google or OSM. Visit `http://127.0.0.1:8770/google?q=φαρμακεία&area=Πεύκα&auto=1`.
+Opens a server with fictional businesses and no network calls to Google or OSM. Visit `http://127.0.0.1:8770/?q=φαρμακεία&area=Πεύκα&auto=1`.
 
 ## Design notes
 

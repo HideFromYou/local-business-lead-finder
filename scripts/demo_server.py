@@ -1,6 +1,6 @@
 """Run the dashboard with FICTIONAL data, no API keys and no network calls to Google/OSM.
 
-    python scripts/demo_server.py            # then open http://127.0.0.1:8770/google?q=φαρμακεία&area=Πεύκα&auto=1
+    python scripts/demo_server.py            # then open http://127.0.0.1:8770/?q=φαρμακεία&area=Πεύκα&auto=1
 
 Everything lives in a temporary database. Business names and phone numbers are made up.
 (The map tiles are still loaded from OpenStreetMap by your browser.)
@@ -43,6 +43,7 @@ class FakeClient:
 
     def __init__(self, key, conn, **kw):
         self.conn, self.calls_made = conn, 0
+        self.call_budget, self.stop_reason = None, ""
 
     def calls_this_month(self):
         return db.get_usage(self.conn, gp.month_key())
@@ -57,6 +58,9 @@ class FakeClient:
         ]
         return places, False
 
+    def search_adaptive(self, query, bbox, max_depth=2):
+        return self.search(query, bbox)
+
 
 def fake_resolve(name, hint=None):
     return [Area(name, f"{name}, Θεσσαλονίκη (demo)", "node", 1, CENTER[0], CENTER[1], "suburb")]
@@ -66,5 +70,5 @@ gp.GooglePlacesClient = FakeClient
 api.resolve_areas = fake_resolve
 
 if __name__ == "__main__":
-    print("DEMO MODE: fictional data. Open http://127.0.0.1:8770/google?q=φαρμακεία&area=Πεύκα&auto=1")
+    print("DEMO MODE: fictional data. Open http://127.0.0.1:8770/?q=φαρμακεία&area=Πεύκα&auto=1")
     uvicorn.run(api.app, host="127.0.0.1", port=8770)

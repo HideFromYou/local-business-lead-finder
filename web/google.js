@@ -1,17 +1,22 @@
 const SITE_LABELS = { none: "Χωρίς website", social_only: "Μόνο social", has_site: "Έχει website" };
 const BADGE_CLASS = { none: "none", social_only: "social_only", has_site: "alive" };
-const MARKER_COLORS = { none: "#dc2626", social_only: "#d97706", has_site: "#16a34a" };
+const PIN_COLORS = { none: "#dc2626", social_only: "#d97706", has_site: "#16a34a" };
 const CONTACT_LABELS = {
   new: "Νέο", called: "Κλήθηκε", interested: "Ενδιαφέρεται", not_interested: "Δεν ενδιαφέρεται", do_not_call: "Να μην καλεστεί",
 };
 const CHIPS = ["φαρμακεία", "καφετέριες", "σούπερ μάρκετ", "κομμωτήρια", "φούρνοι", "εστιατόρια", "γυμναστήρια", "βιβλιοπωλεία", "οδοντίατροι", "ηλεκτρολόγοι"];
-function ensureMapSoon() { addEventListener('DOMContentLoaded', () => ensureMap()); if (document.readyState !== 'loading') ensureMap(); }
 const GRID_CALLS = { 1: 3, 2: 12, 3: 27 };
+const ALL_QUERY = "καταστήματα";
+let mode = "category";
 
 const $ = (id) => document.getElementById(id);
 let results = [];
-let status = { calls_this_month: 0, limit: 900 };
+let usage = { calls_this_month: 0, limit: 900 };
 let map, markerLayer;
+let selectedId = null;
+let lastKey = "";
+const cardsByPlace = new Map();
+const markersByPlace = new Map();
 
 function el(tag, props = {}, ...children) {
   const node = document.createElement(tag);
@@ -29,10 +34,16 @@ async function api(url, options) {
   return res.json();
 }
 
-const setStatus = (text) => { $("status").textContent = text; };
+function setStatus(text, isError = false) {
+  const box = $("status");
+  box.hidden = !text;
+  box.textContent = text;
+  box.classList.toggle("error", isError);
+}
+
 const phoneOf = (r) => r.manual_phone || r.phone || "";
 const showUsage = () => {
-  $("usage").textContent = `Κλήσεις Google αυτόν τον μήνα: ${status.calls_this_month} από ${status.limit} (σκληρό όριο του εργαλείου).`;
+  $("usage").textContent = `Κλήσεις Google αυτόν τον μήνα: ${usage.calls_this_month} από ${usage.limit} (σκληρό όριο του εργαλείου).`;
 };
 
 function safeHttpUrl(url) {
@@ -42,90 +53,129 @@ function safeHttpUrl(url) {
   } catch { return null; }
 }
 
-const googleUrl = (r) =>
+const googleSearchUrl = (r) =>
   "https://www.google.com/search?q=" + encodeURIComponent([r.name, r.address].filter(Boolean).join(" "));
+const googleMapsUrl = (r) =>
+  "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(`${r.name} ${r.address || ""}`);
+
+function stars(r) {
+  if (!r.rating) return el("span", { className: "muted", textContent: "χωρίς βαθμολογία" });
+  return el("span", { className: "stars", textContent: `★ ${r.rating.toFixed(1)}`, title: `${r.rating_count || 0} κριτικές` },
+    el("span", { className: "muted", textContent: ` (${r.rating_count || 0})` }));
+}
 
 async function save(r, body, box) {
   try {
     await api(`/api/google/leads/${encodeURIComponent(r.place_id)}`, {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     });
-  } catch (e) { alert("Η αποθήκευση απέτυχε: " + e.message); return; }
+  } catch (e) { alert("Η αποθήκευση απέτυχε: " + e.message); return false; }
   Object.assign(r, body);
   box.classList.add("saved");
   setTimeout(() => box.classList.remove("saved"), 800);
   if (body.contact_status === "do_not_call") { results = results.filter((x) => x !== r); render(); }
+  return true;
 }
 
-const cardsByPlace = new Map();
-const markersByPlace = new Map();
-let selectedId = null;
-
-function phoneBlock(r) {
-  const box = el("div", { className: "phone-block" });
-  const phone = phoneOf(r);
-  if (phone) box.append(el("a", { className: "phone-link", href: "tel:" + phone.replace(/[^\d+]/g, ""), textContent: phone }));
-  const input = el("input", { type: "text", className: "phone-input", maxLength: 40, value: r.manual_phone || "",
-    placeholder: phone ? "άλλο τηλέφωνο" : "πρόσθεσε τηλέφωνο" });
-  input.onblur = () => {
-    if (input.value.trim() !== (r.manual_phone || "")) save(r, { manual_phone: input.value }, input).then(render);
+function contactInput(r, field, placeholder, type) {
+  const input = el("input", { type, className: "mini", maxLength: 120, value: r[field] || "", placeholder });
+  input.onblur = async () => {
+    if (input.value.trim() === (r[field] || "")) return;
+    if (await save(r, { [field]: input.value }, input) && field === "manual_phone") render();
   };
   input.onkeydown = (e) => { if (e.key === "Enter") input.blur(); };
-  box.append(input);
-  return box;
-}
-
-function selectPlace(r, fromMap) {
-  selectedId = r.place_id;
-  cardsByPlace.forEach((card, id) => card.classList.toggle("selected", id === r.place_id));
-  const marker = markersByPlace.get(r.place_id);
-  if (marker) { if (!fromMap) map.setView([r.lat, r.lon], Math.max(map.getZoom(), 16)); marker.openPopup(); }
-  if (fromMap) cardsByPlace.get(r.place_id)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  return input;
 }
 
 function card(r) {
+  const phone = phoneOf(r);
   const href = r.website_url && safeHttpUrl(r.website_url);
-  const rating = r.rating ? `★ ${r.rating.toFixed(1)} (${r.rating_count || 0})` : "";
+
+  const call = phone
+    ? el("a", { className: "phone-link", href: "tel:" + phone.replace(/[^\d+]/g, ""), textContent: "Κλήση " + phone })
+    : el("span", { className: "muted", textContent: "Χωρίς τηλέφωνο" });
 
   const checkbox = el("input", { type: "checkbox", checked: !!r.no_site_verified });
   checkbox.onchange = () => save(r, { no_site_verified: checkbox.checked }, checkbox.closest(".card-item"));
-  const contact = el("select");
+  const contact = el("select", { className: "mini" });
   for (const [value, label] of Object.entries(CONTACT_LABELS)) {
     contact.append(el("option", { value, textContent: label, selected: value === r.contact_status }));
   }
-  contact.onchange = () => save(r, { contact_status: contact.value }, contact).then(() => {
+  contact.onchange = async () => {
+    if (!(await save(r, { contact_status: contact.value }, contact))) return;
     const item = cardsByPlace.get(r.place_id);   // restyle in place: a full render would close the open card
     if (item) item.className = item.className.replace(/s-\w+/, "s-" + r.contact_status);
-  });
+  };
   const notes = el("textarea", { value: r.notes || "", placeholder: "σημειώσεις κλήσης", rows: 3 });
   notes.onblur = () => { if (notes.value !== (r.notes || "")) save(r, { notes: notes.value }, notes); };
 
   const more = el("details", { className: "card-more" },
-    el("summary", { textContent: r.no_site_verified ? "Επιβεβαιωμένο ✓ · σημειώσεις και επαφή" : "Επιβεβαίωση, σημειώσεις και επαφή" }),
+    el("summary", { textContent: r.no_site_verified ? "Επιβεβαιωμένο ✓ · στοιχεία επαφής" : "Στοιχεία επαφής και σημειώσεις" }),
     el("div", { className: "more-body" },
-      el("a", { href: googleUrl(r), target: "_blank", rel: "noopener noreferrer", textContent: "Αναζήτηση στο Google για επιβεβαίωση ↗" }),
-      el("label", { className: "check" }, checkbox, " Έλεγξα: δεν έχει website"),
+      contactInput(r, "manual_phone", "τηλέφωνο (δικό σου)", "text"),
+      contactInput(r, "manual_email", "email", "email"),
+      el("label", { className: "check" }, checkbox, " Έλεγξα στο Google: δεν έχει website"),
       contact, notes));
   more.addEventListener("click", (e) => e.stopPropagation());
 
   const item = el("article", { className: "card-item s-" + r.contact_status + (r.place_id === selectedId ? " selected" : "") },
     el("div", { className: "card-title" }, el("span", { textContent: r.name }),
       el("span", { className: "badge " + BADGE_CLASS[r.site_status], textContent: SITE_LABELS[r.site_status] })),
-    el("div", { className: "card-meta", textContent: [rating, r.address].filter(Boolean).join(" · ") }),
-    phoneBlock(r));
+    el("div", { className: "card-line" }, stars(r), el("span", { className: "muted", textContent: r.address || "" })),
+    el("div", { className: "card-actions" }, call));
+  if (r.manual_email) item.querySelector(".card-actions").append(
+    el("a", { href: "mailto:" + r.manual_email, textContent: r.manual_email, className: "card-meta" }));
   if (href) item.append(el("a", { href, target: "_blank", rel: "noopener noreferrer", className: "card-meta", textContent: r.website_url }));
+  item.append(el("div", { className: "card-actions" },
+    el("a", { href: googleSearchUrl(r), target: "_blank", rel: "noopener noreferrer", textContent: "Έλεγχος στο Google ↗" }),
+    el("a", { href: googleMapsUrl(r), target: "_blank", rel: "noopener noreferrer", textContent: "Google Maps ↗" })));
   item.append(more);
   item.onclick = (e) => { if (!e.target.closest("a,input,select,textarea,button,summary")) selectPlace(r, false); };
   cardsByPlace.set(r.place_id, item);
   return item;
 }
 
+function popupFor(r) {
+  const body = el("div", { className: "popup" },
+    el("b", { textContent: r.name }), stars(r),
+    el("span", { className: "badge " + BADGE_CLASS[r.site_status], textContent: SITE_LABELS[r.site_status] }),
+    el("div", { textContent: phoneOf(r) || "χωρίς τηλέφωνο" }));
+  if (r.manual_email) body.append(el("div", { textContent: r.manual_email }));
+  return body;
+}
+
+function pinIcon(r, selected) {
+  // html is built only from our own constants, never from business data
+  return L.divIcon({
+    className: "pin-wrap", iconSize: [26, 26], iconAnchor: [13, 30], popupAnchor: [0, -28],
+    html: `<div class="pin${selected ? " selected" : ""}" style="--c:${PIN_COLORS[r.site_status]}"></div>`,
+  });
+}
+
+function selectPlace(r, fromMap) {
+  const previous = results.find((x) => x.place_id === selectedId);
+  selectedId = r.place_id;
+  if (previous && markersByPlace.has(previous.place_id)) markersByPlace.get(previous.place_id).setIcon(pinIcon(previous, false));
+  cardsByPlace.forEach((card, id) => card.classList.toggle("selected", id === r.place_id));
+  const marker = markersByPlace.get(r.place_id);
+  if (marker) {
+    marker.setIcon(pinIcon(r, true));
+    if (!fromMap) map.setView([r.lat, r.lon], Math.max(map.getZoom(), 16));
+    marker.openPopup();
+  }
+  if (fromMap) cardsByPlace.get(r.place_id)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
 function visible() {
   const text = $("text-filter").value.trim().toLowerCase();
-  return results.filter((r) =>
+  const list = results.filter((r) =>
     (!$("only-no-site").checked || r.site_status !== "has_site") &&
     (!$("only-phone").checked || phoneOf(r)) &&
     (!text || (r.name + " " + (r.address || "")).toLowerCase().includes(text)));
+  const sort = $("sort").value;
+  const by = { rating: (a, b) => (b.rating || 0) - (a.rating || 0), reviews: (a, b) => (b.rating_count || 0) - (a.rating_count || 0),
+    name: (a, b) => a.name.localeCompare(b.name, "el") };
+  return list.sort(by[sort]);
 }
 
 function ensureMap() {
@@ -135,23 +185,24 @@ function ensureMap() {
   markerLayer = L.layerGroup().addTo(map);
 }
 
-function renderMap(list, refit) {
+function renderMap(list) {
   ensureMap();
   markerLayer.clearLayers();
   markersByPlace.clear();
   const points = [];
-  list.filter((r) => r.lat != null).forEach((r) => {
-    const marker = L.circleMarker([r.lat, r.lon], { radius: 9, color: "#fff", weight: 2, fillColor: MARKER_COLORS[r.site_status], fillOpacity: 0.95 });
-    marker.bindPopup(el("div", {}, el("b", { textContent: r.name }), el("br"), el("span", { textContent: phoneOf(r) || "χωρίς τηλέφωνο" })));
+  list.filter((r) => r.lat != null && r.lon != null).forEach((r) => {
+    const marker = L.marker([r.lat, r.lon], { icon: pinIcon(r, r.place_id === selectedId), title: r.name });
+    marker.bindPopup(popupFor(r));
     marker.on("click", () => selectPlace(r, true));
     marker.addTo(markerLayer);
     markersByPlace.set(r.place_id, marker);
     points.push([r.lat, r.lon]);
   });
-  if (refit && points.length) map.fitBounds(points, { padding: [40, 40], maxZoom: 17 });
+  const key = points.map((p) => p.join()).join("|");
+  if (points.length && key !== lastKey) map.fitBounds(points, { padding: [50, 50], maxZoom: 17 });   // re-zoom only if the pins changed
+  lastKey = key;
 }
 
-let lastCount = -1;
 function render() {
   const list = visible();
   cardsByPlace.clear();
@@ -163,78 +214,92 @@ function render() {
     ["Μόνο social", count((r) => r.site_status === "social_only")], ["Με τηλέφωνο", count((r) => phoneOf(r))]];
   $("stats").replaceChildren(...(results.length ? stats : []).map(([label, n]) =>
     el("div", { className: "stat" }, el("b", { textContent: n }), el("span", { textContent: label }))));
-  renderMap(list, list.length !== lastCount);   // only re-zoom when the set of results changed
-  lastCount = list.length;
+  try { renderMap(list); } catch (e) { setStatus("Πρόβλημα στον χάρτη: " + e.message, true); }
+}
+
+function setMode(next) {
+  mode = next;
+  $("tab-category").classList.toggle("active", mode === "category");
+  $("tab-all").classList.toggle("active", mode === "all");
+  for (const id of ["query-wrap", "chips", "grid-wrap"]) $(id).hidden = mode === "all";
+  for (const id of ["budget-wrap", "all-note"]) $(id).hidden = mode !== "all";
 }
 
 async function runSearch(area) {
-  const query = $("query").value.trim();
+  const query = mode === "all" ? ALL_QUERY : $("query").value.trim();
   const grid = Number($("grid").value);
-  const max = GRID_CALLS[grid];
-  const left = status.limit - status.calls_this_month;
-  if (grid > 1 && !confirm(`Η αναζήτηση θα χρησιμοποιήσει έως ${max} κλήσεις Google (απομένουν ${left} αυτόν τον μήνα). Συνέχεια;`)) return;
-  setStatus("Αναζήτηση στο Google...");
+  const maxCalls = mode === "all" ? Number($("budget").value) : GRID_CALLS[grid];
+  const left = usage.limit - usage.calls_this_month;
+  if ((mode === "all" || grid > 1) &&
+      !confirm(`Η αναζήτηση θα χρησιμοποιήσει έως ${maxCalls} κλήσεις Google (απομένουν ${left} αυτόν τον μήνα). Συνέχεια;`)) return;
+  setStatus(`Αναζήτηση «${query}» σε: ${area.display_name}`);
   $("search-btn").disabled = true;
   try {
     const { name, display_name, osm_type, osm_id, lat, lon, place_type, bbox } = area;
     const data = await api("/api/google/search", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query, grid, radius: Number($("radius").value) || 1500,
+      body: JSON.stringify({ query, grid, mode, max_calls: Number($("budget").value), radius: Number($("radius").value) || 1500,
         area: { name, display_name, osm_type, osm_id, lat, lon, place_type, bbox } }),
     });
     results = data.results;
-    status = { calls_this_month: data.calls_this_month, limit: data.limit };
+    selectedId = null;
+    usage = { calls_this_month: data.calls_this_month, limit: data.limit };
     showUsage();
-    setStatus(`${results.length} καταστήματα · ${data.calls_used_now} κλήσεις σε αυτή την αναζήτηση` +
-      (data.partial ? " · ΣΤΑΜΑΤΗΣΕ νωρίς: έφτασες το μηνιαίο όριο." : ""));
+    const what = mode === "all" ? "όλα τα καταστήματα" : `«${query}»`;
+    setStatus(`${results.length} καταστήματα · ${what} · ${area.display_name.split(",")[0]} · ${data.calls_used_now} κλήσεις` +
+      (data.partial ? ` · ΣΤΑΜΑΤΗΣΕ νωρίς: ${data.stop_reason}` : ""), data.partial);
     render();
-  } catch (e) { setStatus(e.message); } finally { $("search-btn").disabled = false; }
+  } catch (e) { setStatus(e.message, true); } finally { $("search-btn").disabled = false; }
 }
 
 async function start() {
-  const query = $("query").value.trim(), name = $("area-name").value.trim();
-  if (query.length < 2 || name.length < 2) { setStatus("Γράψε τι ψάχνεις και σε ποια περιοχή."); return; }
-  $("candidates").replaceChildren();
+  const query = $("query").value.trim(), name = $("area-name").value.trim(), hint = $("area-hint").value.trim();
+  if ((mode === "category" && query.length < 2) || name.length < 2) {
+    setStatus(mode === "all" ? "Γράψε την περιοχή." : "Γράψε τι ψάχνεις και σε ποια περιοχή.", true); return;
+  }
+  try { localStorage.setItem("scanner-city", hint); } catch { /* storage may be blocked */ }
+  $("pick-wrap").hidden = true;
   setStatus("Εύρεση περιοχής...");
   try {
     const params = new URLSearchParams({ name });
-    if ($("area-hint").value.trim()) params.set("hint", $("area-hint").value.trim());
-    const areas = await api("/api/resolve?" + params);
-    if (!areas.length) { setStatus("Δεν βρέθηκε περιοχή. Δοκίμασε άλλο όνομα ή αφαίρεσε το φίλτρο."); return; }
-    if (areas.length === 1) { runSearch({ ...areas[0], name }); return; }
-    setStatus("Βρέθηκαν πολλές περιοχές. Διάλεξε τη σωστή:");
-    $("candidates").replaceChildren(...areas.map((a) => {
-      const radio = el("input", { type: "radio", name: "candidate" });
-      radio.onchange = () => { $("candidates").replaceChildren(); runSearch({ ...a, name }); };
-      return el("label", { className: "candidate" }, radio,
-        el("span", {}, a.display_name, el("small", { textContent: a.has_boundary ? " (με όρια)" : " (σημείο)" })));
-    }));
-  } catch (e) { setStatus(e.message); }
+    if (hint) params.set("hint", hint);
+    const areas = (await api("/api/resolve?" + params)).map((a) => ({ ...a, name }));
+    if (!areas.length) { setStatus("Δεν βρέθηκε περιοχή. Δοκίμασε άλλο όνομα ή άλλαξε την πόλη.", true); return; }
+    if (areas.length > 1) {   // search the best match at once; the dropdown lets you switch
+      $("area-pick").replaceChildren(...areas.map((a, i) => el("option", { value: i, textContent: a.display_name.slice(0, 90) })));
+      $("area-pick").onchange = () => runSearch(areas[Number($("area-pick").value)]);
+      $("pick-wrap").hidden = false;
+    }
+    runSearch(areas[0]);
+  } catch (e) { setStatus(e.message, true); }
 }
 
 async function init() {
   $("chips").replaceChildren(...CHIPS.map((c) => {
     const chip = el("button", { type: "button", className: "chip", textContent: c });
-    chip.onclick = () => { $("query").value = c; $("query").focus(); };
+    chip.onclick = () => { $("query").value = c; $("area-name").focus(); };
     return chip;
   }));
-  ["only-no-site", "only-phone"].forEach((id) => $(id).addEventListener("change", render));
+  ["only-no-site", "only-phone", "sort"].forEach((id) => $(id).addEventListener("change", render));
   $("text-filter").addEventListener("input", render);
   $("search-btn").onclick = start;
+  $("tab-category").onclick = () => setMode("category");
+  $("tab-all").onclick = () => setMode("all");
   ["query", "area-name", "area-hint"].forEach((id) => $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") start(); }));
+  try { $("area-hint").value = localStorage.getItem("scanner-city") ?? "Θεσσαλονίκη"; } catch { $("area-hint").value = "Θεσσαλονίκη"; }
+  ensureMap();
   try {
-    const s = await api("/api/google/status");
-    status = s;
-    if (!s.configured) { setStatus("Λείπει το GOOGLE_PLACES_API_KEY από το .env"); $("search-btn").disabled = true; }
+    usage = await api("/api/google/status");
+    if (!usage.configured) { setStatus("Λείπει το GOOGLE_PLACES_API_KEY από το .env", true); $("search-btn").disabled = true; }
     showUsage();
-  } catch (e) { setStatus(e.message); }
-  // Shareable link, e.g. /google?q=φαρμακεία&area=Πεύκα&hint=Θεσσαλονίκη&auto=1
+  } catch (e) { setStatus(e.message, true); }
+  // Shareable link, e.g. /?q=φαρμακεία&area=Πεύκα&hint=Θεσσαλονίκη&auto=1
   const params = new URLSearchParams(location.search);
   if (params.get("q")) $("query").value = params.get("q");
   if (params.get("area")) $("area-name").value = params.get("area");
-  if (params.get("hint")) { $("area-hint").value = params.get("hint"); $("area-hint").closest("details").open = true; }
+  if (params.get("hint") !== null) $("area-hint").value = params.get("hint");
+  if (params.get("mode") === "all") setMode("all");
   if (params.get("auto") === "1" && !$("search-btn").disabled) start();
 }
 
-ensureMapSoon();
 init();

@@ -162,3 +162,50 @@ def test_place_id_validation_and_error_mapping(api, monkeypatch):
         key, conn, transport=httpx.MockTransport(lambda req: httpx.Response(403, json={"error": {"message": "denied"}})), **kw))
     r = api.post("/api/google/search", json={"query": "φαρμακεία", "area": AREA})
     assert r.status_code == 502 and "denied" in r.json()["detail"] and "KEY" not in r.text
+
+
+def test_manual_email_saved_validated_and_returned(api, monkeypatch):
+    fake_google(monkeypatch, [place(1)])
+    assert api.patch("/api/google/leads/pid1", json={"manual_email": "info@shop.gr"}).status_code == 200
+    assert api.patch("/api/google/leads/pid1", json={"manual_email": "not an email"}).status_code == 422
+    r = api.post("/api/google/search", json={"query": "φαρμακεία", "area": AREA}).json()["results"]
+    assert r[0]["manual_email"] == "info@shop.gr"
+    api.patch("/api/google/leads/pid1", json={"manual_email": ""})
+    assert api.post("/api/google/search", json={"query": "φαρμακεία", "area": AREA}).json()["results"][0]["manual_email"] is None
+
+
+def test_root_serves_the_google_page(api):
+    assert "Web Presence Scanner" in api.get("/").text and "google.js" in api.get("/").text
+
+
+def test_adaptive_splits_a_capped_cell_and_dedupes():
+    state = {"n": 0}
+    def handler(req):
+        state["n"] += 1
+        body = json.loads(req.content)
+        low = body["locationRestriction"]["rectangle"]["low"]["latitude"]
+        if state["n"] <= 3:  # the whole area: three full pages = 60 results = capped
+            first = (state["n"] - 1) * 20
+            places = [place(first + i) for i in range(20)]
+            return httpx.Response(200, json={"places": places, **({"nextPageToken": "T"} if state["n"] < 3 else {})})
+        return httpx.Response(200, json={"places": [place(1000 + state["n"]), place(0)]})  # place(0) is a repeat
+    client, _ = client_with(handler)
+    places, partial = client.search_adaptive("καταστήματα", (40.0, 41.0, 22.0, 23.0))
+    assert not partial and client.calls_made == 3 + 4  # whole area, then 4 sub-cells
+    assert len(places) == 60 + 4  # 4 new places, the repeated one is not counted twice
+
+
+def test_adaptive_respects_the_search_call_budget():
+    def handler(req):
+        return httpx.Response(200, json={"places": [place(1)], "nextPageToken": "T"})
+    client, _ = client_with(handler)
+    client.call_budget = 2
+    places, partial = client.search_adaptive("x", (0, 1, 0, 1))
+    assert partial and client.calls_made == 2 and "2 κλήσεων" in client.stop_reason
+
+
+def test_all_mode_endpoint_uses_adaptive_and_budget(api, monkeypatch):
+    fake_google(monkeypatch, [place(1), place(2)])
+    r = api.post("/api/google/search", json={"query": "καταστήματα", "area": AREA, "mode": "all", "max_calls": 15}).json()
+    assert len(r["results"]) == 2 and r["calls_used_now"] == 1 and r["stop_reason"] == ""
+    assert api.post("/api/google/search", json={"query": "καταστήματα", "area": AREA, "mode": "all", "max_calls": 1000}).status_code == 422

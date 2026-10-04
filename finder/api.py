@@ -132,10 +132,15 @@ class GoogleSearchIn(BaseModel):
     area: AreaIn
     radius: int = Field(default=1500, ge=100, le=5000)
     grid: Literal[1, 2, 3] = 1
+    mode: Literal["category", "all"] = "category"  # "all" = every kind of business, split automatically
+    max_calls: int = Field(default=30, ge=3, le=90)  # budget for one "all" search
+
+
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 class GoogleLeadUpdate(ContactUpdate):
-    pass
+    manual_email: str | None = Field(default=None, max_length=120)
 
 
 PLACE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,200}$")
@@ -161,11 +166,15 @@ def google_search(body: GoogleSearchIn, conn=Depends(get_conn)):
     bbox = area.bbox if area.has_boundary and area.bbox else gp.bbox_from_point(area.lat, area.lon, body.radius)
     client = gp.GooglePlacesClient(key, conn)
     try:
-        places, partial = client.search(body.query, bbox, body.grid)
+        if body.mode == "all":
+            client.call_budget = body.max_calls
+            places, partial = client.search_adaptive(body.query, bbox)
+        else:
+            places, partial = client.search(body.query, bbox, body.grid)
     except gp.GoogleApiError as e:
         raise HTTPException(502, str(e))
     if partial and not places:
-        raise HTTPException(429, f"Έφτασες το μηνιαίο όριο των {client.limit} κλήσεων.")
+        raise HTTPException(429, client.stop_reason or f"Έφτασες το μηνιαίο όριο των {client.limit} κλήσεων.")
 
     own = db.get_google_leads(conn, [p.place_id for p in places])
     results = []
@@ -179,21 +188,25 @@ def google_search(body: GoogleSearchIn, conn=Depends(get_conn)):
             "notes": mine["notes"] if mine else None,
             "contact_status": mine["contact_status"] if mine else "new",
             "manual_phone": mine["manual_phone"] if mine else None,
+            "manual_email": mine["manual_email"] if mine else None,
             "no_site_verified": mine["no_site_verified"] if mine else 0,
         })
     return {
         "results": results, "partial": partial, "calls_used_now": client.calls_made,
         "calls_this_month": client.calls_this_month(), "limit": client.limit,
+        "stop_reason": client.stop_reason if partial else "",
     }
 
 
 @app.patch("/api/google/leads/{place_id}")
-def update_google_lead(place_id: str, body: ContactUpdate, conn=Depends(get_conn)):
+def update_google_lead(place_id: str, body: GoogleLeadUpdate, conn=Depends(get_conn)):
     if not PLACE_ID_RE.match(place_id):
         raise HTTPException(422, "Μη έγκυρο place_id")
+    if body.manual_email and not EMAIL_RE.match(body.manual_email.strip()):
+        raise HTTPException(422, "Μη έγκυρο email")
     with conn:
         db.update_google_lead(conn, place_id, body.notes, body.contact_status,
-                              body.manual_phone, body.no_site_verified)
+                              body.manual_phone, body.no_site_verified, body.manual_email)
     return {"ok": True}
 
 
@@ -241,12 +254,18 @@ def export_csv(f: Filters = Depends(), conn=Depends(get_conn)):
 
 @app.get("/")
 def index():
-    return FileResponse(WEB_DIR / "index.html")
+    return FileResponse(WEB_DIR / "google.html")
 
 
 @app.get("/google")
 def google_page():
     return FileResponse(WEB_DIR / "google.html")
+
+
+@app.get("/osm")
+def osm_page():
+    """The older table of OpenStreetMap results (not linked from the main UI)."""
+    return FileResponse(WEB_DIR / "index.html")
 
 
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")

@@ -3,51 +3,68 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Lead Finder · Google</title>
+  <title>Web Presence Scanner</title>
   <link rel="stylesheet" href="/static/vendor/leaflet.css">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body class="maps">
   <aside class="sidebar">
     <div class="side-head">
-      <div>
-        <h1>Lead Finder</h1>
-        <p class="sub">Επιχειρήσεις χωρίς website</p>
-      </div>
-      <nav class="actions">
-        <a class="button" href="/google">Google</a>
-        <a class="button secondary" href="/">Λίστα OSM</a>
-      </nav>
+      <h1>Web Presence Scanner</h1>
+      <p class="sub">Βρες επιχειρήσεις χωρίς website</p>
     </div>
 
     <section class="search">
-      <label>Τι ψάχνεις <input id="query" type="text" maxlength="100" placeholder="π.χ. φαρμακεία"></label>
-      <label>Περιοχή <input id="area-name" type="text" maxlength="100" placeholder="π.χ. Πεύκα"></label>
+      <div class="tabs" role="tablist">
+        <button id="tab-category" class="tab active" type="button" role="tab">Συγκεκριμένη κατηγορία</button>
+        <button id="tab-all" class="tab" type="button" role="tab">Όλα τα καταστήματα</button>
+      </div>
+      <label id="query-wrap">Τι ψάχνεις <input id="query" type="text" maxlength="100" placeholder="π.χ. φαρμακεία" autocomplete="off"></label>
+      <div class="two">
+        <label>Περιοχή <input id="area-name" type="text" maxlength="100" placeholder="π.χ. Πεύκα" autocomplete="off"></label>
+        <label>Πόλη <input id="area-hint" type="text" maxlength="100" placeholder="π.χ. Θεσσαλονίκη" autocomplete="off"></label>
+      </div>
       <div class="chips" id="chips"></div>
+      <p id="all-note" class="hint" hidden>Σαρώνει όλη την περιοχή και χωρίζει αυτόματα σε μικρότερα κομμάτια όπου η Google φτάνει το όριο των 60 αποτελεσμάτων. Χρησιμοποιεί περισσότερες κλήσεις.</p>
       <details class="advanced">
         <summary>Προχωρημένα</summary>
         <div class="adv-body">
-          <label>Φίλτρο περιοχής (προαιρετικό) <input id="area-hint" type="text" maxlength="100" placeholder="π.χ. Θεσσαλονίκη"></label>
-          <label>Κάλυψη
+          <label id="budget-wrap" hidden>Μέγιστες κλήσεις για αυτή την αναζήτηση
+            <select id="budget">
+              <option value="12">Μικρή · έως 12 κλήσεις</option>
+              <option value="30" selected>Μεσαία · έως 30 κλήσεις</option>
+              <option value="60">Μεγάλη · έως 60 κλήσεις</option>
+            </select>
+          </label>
+          <label id="grid-wrap">Κάλυψη
             <select id="grid">
               <option value="1">Γρήγορη · έως 3 κλήσεις</option>
               <option value="2">Μεσαία · έως 12 κλήσεις</option>
               <option value="3">Μεγάλη · έως 27 κλήσεις</option>
             </select>
           </label>
-          <label>Ακτίνα (m) <input id="radius" type="number" min="100" max="5000" step="100" value="1500"></label>
+          <label>Ακτίνα για σημεία (m) <input id="radius" type="number" min="100" max="5000" step="100" value="1500"></label>
         </div>
       </details>
       <button id="search-btn" class="button wide">Αναζήτηση</button>
-      <div id="candidates"></div>
-      <p id="status" class="hint" role="status"></p>
+      <label id="pick-wrap" hidden>Βρέθηκαν πολλές περιοχές, διάλεξε
+        <select id="area-pick"></select>
+      </label>
+      <p id="status" class="banner" role="status" hidden></p>
     </section>
 
     <section class="result-filters" id="result-filters" hidden>
+      <div class="stats compact" id="stats"></div>
       <label class="check"><input id="only-no-site" type="checkbox" checked> Μόνο χωρίς website (και μόνο social)</label>
       <label class="check"><input id="only-phone" type="checkbox"> Μόνο με τηλέφωνο</label>
-      <input id="text-filter" type="search" placeholder="Φίλτρο ονόματος ή διεύθυνσης">
-      <div class="stats compact" id="stats"></div>
+      <div class="two">
+        <input id="text-filter" type="search" placeholder="Φίλτρο ονόματος ή διεύθυνσης">
+        <select id="sort">
+          <option value="rating">Βαθμολογία</option>
+          <option value="reviews">Περισσότερες κριτικές</option>
+          <option value="name">Όνομα</option>
+        </select>
+      </div>
     </section>
 
     <section id="cards" class="cards"></section>

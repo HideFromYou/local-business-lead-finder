@@ -111,13 +111,19 @@ class GooglePlacesClient:
         self.limit = monthly_limit() if limit is None else limit
         self.http = httpx.Client(timeout=30, transport=transport)
         self.calls_made = 0
+        self.call_budget: int | None = None  # optional cap for ONE search (on top of the monthly limit)
+        self.stop_reason = ""
 
     def calls_this_month(self) -> int:
         return db.get_usage(self.conn, month_key())
 
     def _post(self, body: dict) -> dict:
+        if self.call_budget is not None and self.calls_made >= self.call_budget:
+            self.stop_reason = f"Έφτασε το όριο των {self.call_budget} κλήσεων αυτής της αναζήτησης."
+            raise QuotaExceeded(self.stop_reason)
         if self.calls_this_month() >= self.limit:
-            raise QuotaExceeded(f"Έφτασες το μηνιαίο όριο των {self.limit} κλήσεων.")
+            self.stop_reason = f"Έφτασες το μηνιαίο όριο των {self.limit} κλήσεων."
+            raise QuotaExceeded(self.stop_reason)
         db.add_usage(self.conn, month_key())  # count before sending: never under-count
         self.calls_made += 1
         response = self.http.post(
@@ -158,6 +164,27 @@ class GooglePlacesClient:
             for cell in grid_cells(bbox, grid):
                 for place in self.iter_cell(query, cell):
                     found.setdefault(place.place_id, place)
+        except QuotaExceeded:
+            return list(found.values()), True
+        return list(found.values()), False
+
+    def search_adaptive(self, query: str, bbox: tuple[float, float, float, float],
+                        max_depth: int = 2) -> tuple[list[GooglePlace], bool]:
+        """Search the whole area; wherever Google hits its 60-result cap, split that cell in 4 and
+        search the parts (up to max_depth levels). Stops cleanly at the call budget or monthly limit."""
+        found: dict[str, GooglePlace] = {}
+
+        def run(cell, depth):
+            count = 0
+            for place in self.iter_cell(query, cell):
+                count += 1
+                found.setdefault(place.place_id, place)
+            if count >= MAX_PAGES * 20 and depth < max_depth:  # capped: there is probably more here
+                for part in grid_cells(cell, 2):
+                    run(part, depth + 1)
+
+        try:
+            run(bbox, 0)
         except QuotaExceeded:
             return list(found.values()), True
         return list(found.values()), False

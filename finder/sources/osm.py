@@ -36,6 +36,8 @@ CATEGORIES: dict[str, tuple[str, str]] = {
     "dentist": ("amenity", "dentist"),
 }
 
+PLACE_CATEGORIES = ("place", "boundary")
+
 _last_request = 0.0
 
 
@@ -106,13 +108,17 @@ def resolve_areas(name: str, hint: str | None = None) -> list[Area]:
             lon=float(r["lon"]),
             place_type=r["type"],
             bbox=tuple(float(x) for x in r["boundingbox"]) if r.get("boundingbox") else None,
+            category=r.get("category", ""),
         )
         for r in results
     ]
     if hint:
         needle = _fold(hint)
         areas = [a for a in areas if needle in _fold(a.display_name)]
-    return areas
+    # Streets and bus stops that happen to share the name are not areas to search in.
+    # (If nothing else matched, keep them so the user is not left with an empty list.)
+    places = [a for a in areas if a.category in PLACE_CATEGORIES]
+    return places or areas
 
 
 def build_query(area: Area, category: str, radius: int = 1500) -> str:

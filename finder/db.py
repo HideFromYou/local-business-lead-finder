@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS google_leads (
     contact_status TEXT NOT NULL DEFAULT 'new'
         CHECK (contact_status IN ('new','called','interested','not_interested','do_not_call')),
     manual_phone TEXT,
+    manual_email TEXT,
     no_site_verified INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -88,10 +89,11 @@ NEW_COLUMNS = {
 
 def migrate(conn: sqlite3.Connection) -> None:
     """Add columns introduced after a database was first created."""
-    existing = {r["name"] for r in conn.execute("PRAGMA table_info(businesses)")}
-    for column, definition in NEW_COLUMNS.items():
-        if column not in existing:
-            conn.execute(f"ALTER TABLE businesses ADD COLUMN {column} {definition}")
+    for table, columns in (("businesses", NEW_COLUMNS), ("google_leads", {"manual_email": "TEXT"})):
+        existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for column, definition in columns.items():
+            if column not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
     conn.commit()
 
 
@@ -276,7 +278,7 @@ def get_google_leads(conn: sqlite3.Connection, place_ids: list[str]) -> dict[str
 
 def update_google_lead(conn: sqlite3.Connection, place_id: str, notes: str | None = None,
                        contact_status: str | None = None, manual_phone: str | None = None,
-                       no_site_verified: bool | None = None) -> None:
+                       no_site_verified: bool | None = None, manual_email: str | None = None) -> None:
     """Create the row on first edit, then update only the given fields."""
     stamp = now()
     conn.execute(
@@ -290,6 +292,8 @@ def update_google_lead(conn: sqlite3.Connection, place_id: str, notes: str | Non
         updates["contact_status"] = contact_status
     if manual_phone is not None:
         updates["manual_phone"] = manual_phone.strip() or None
+    if manual_email is not None:
+        updates["manual_email"] = manual_email.strip() or None
     if no_site_verified is not None:
         updates["no_site_verified"] = int(no_site_verified)
     if updates:

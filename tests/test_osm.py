@@ -65,3 +65,19 @@ def test_user_agent_ignores_placeholder_contact(monkeypatch):
     assert "me@mydomain.gr" in user_agent()
     monkeypatch.delenv("OVERPASS_CONTACT")
     assert user_agent().endswith("personal tool)")
+
+
+def test_resolve_areas_drops_streets_and_bus_stops(monkeypatch):
+    from finder.sources import osm
+    rows = [
+        {"osm_type": "node", "osm_id": 1, "category": "highway", "type": "bus_stop", "display_name": "ΠΕΥΚΑ, Θεσσαλονίκης", "lat": "1", "lon": "2", "boundingbox": ["1", "1", "2", "2"]},
+        {"osm_type": "node", "osm_id": 2, "category": "place", "type": "suburb", "display_name": "Πεύκα, Θεσσαλονίκη", "lat": "1", "lon": "2", "boundingbox": ["1", "1", "2", "2"]},
+        {"osm_type": "node", "osm_id": 3, "category": "place", "type": "hamlet", "display_name": "Πεύκα, Έβρου", "lat": "1", "lon": "2", "boundingbox": ["1", "1", "2", "2"]},
+    ]
+    monkeypatch.setattr(osm, "_cached_request", lambda *a, **k: rows)
+    areas = osm.resolve_areas("πευκα", "Θεσσαλονίκη")
+    assert [a.osm_id for a in areas] == [2]
+    assert [a.osm_id for a in osm.resolve_areas("πευκα")] == [2, 3]
+    only_street = [rows[0]]
+    monkeypatch.setattr(osm, "_cached_request", lambda *a, **k: only_street)
+    assert [a.osm_id for a in osm.resolve_areas("x")] == [1]  # never an empty dead end
