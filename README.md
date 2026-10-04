@@ -2,7 +2,7 @@
 
 A personal tool that scans a geographic area and finds local businesses (cafes, shops, pharmacies, ...) that have **no website** or a **dead website**. Those businesses are potential customers for a web developer, so the tool turns public map data into a call list.
 
-> Status: work in progress (Phase 0 of 5 done). See [Roadmap](#roadmap).
+> Status: work in progress (Phase 1 of 5 done). See [Roadmap](#roadmap).
 
 ## How it works
 
@@ -31,7 +31,7 @@ A personal tool that scans a geographic area and finds local businesses (cafes, 
 ## Roadmap
 
 - [x] Phase 0: project skeleton
-- [ ] Phase 1: OSM/Overpass source and CLI `scan`
+- [x] Phase 1: OSM/Overpass source and CLI `scan`
 - [ ] Phase 2: SQLite storage and deduplication
 - [ ] Phase 3: website checker and CLI `check`
 - [ ] Phase 4: FastAPI dashboard with filters, notes and CSV export
@@ -50,3 +50,11 @@ pytest
 ## Data attribution
 
 Business data © OpenStreetMap contributors, available under the [ODbL](https://opendatacommons.org/licenses/odbl/).
+
+## Usage
+
+```
+python -m finder.cli scan --area "Πεύκα" --category cafe --hint Θεσσαλονίκη
+```
+
+If a name matches several places, the candidates are listed and you narrow down with `--hint` or `--pick N`.
