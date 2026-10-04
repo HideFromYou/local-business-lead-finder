@@ -1,5 +1,7 @@
 import csv
 import io
+import os
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -14,6 +16,7 @@ import httpx
 from . import db
 from .checker import check_many
 from .sources.base import Area
+from .sources import google_places as gp
 from .sources.osm import CATEGORIES, OsmSource, resolve_areas
 
 load_dotenv()
@@ -62,6 +65,7 @@ class AreaIn(BaseModel):
     lat: float
     lon: float
     place_type: str = Field(default="", max_length=50)
+    bbox: tuple[float, float, float, float] | None = None
 
 
 class ScanIn(BaseModel):
@@ -123,6 +127,76 @@ async def run_checks():
         conn.close()
 
 
+class GoogleSearchIn(BaseModel):
+    query: str = Field(min_length=2, max_length=100)
+    area: AreaIn
+    radius: int = Field(default=1500, ge=100, le=5000)
+    grid: Literal[1, 2, 3] = 1
+
+
+class GoogleLeadUpdate(ContactUpdate):
+    pass
+
+
+PLACE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,200}$")
+
+
+@app.get("/api/google/status")
+def google_status(conn=Depends(get_conn)):
+    return {
+        "configured": bool(os.getenv("GOOGLE_PLACES_API_KEY")),
+        "calls_this_month": db.get_usage(conn, gp.month_key()),
+        "limit": gp.monthly_limit(),
+    }
+
+
+@app.post("/api/google/search")
+def google_search(body: GoogleSearchIn, conn=Depends(get_conn)):
+    """Live Google search. Results are NOT stored: only place_id + our own fields live in the DB."""
+    key = os.getenv("GOOGLE_PLACES_API_KEY")
+    if not key:
+        raise HTTPException(400, "Λείπει το GOOGLE_PLACES_API_KEY από το .env")
+    area = Area(**body.area.model_dump())
+    # For a point place (a suburb is only a point in OSM) we use a square of `radius` around it.
+    bbox = area.bbox if area.has_boundary and area.bbox else gp.bbox_from_point(area.lat, area.lon, body.radius)
+    client = gp.GooglePlacesClient(key, conn)
+    try:
+        places, partial = client.search(body.query, bbox, body.grid)
+    except gp.GoogleApiError as e:
+        raise HTTPException(502, str(e))
+    if partial and not places:
+        raise HTTPException(429, f"Έφτασες το μηνιαίο όριο των {client.limit} κλήσεων.")
+
+    own = db.get_google_leads(conn, [p.place_id for p in places])
+    results = []
+    for p in places:
+        mine = own.get(p.place_id)
+        if mine and mine["contact_status"] == "do_not_call":
+            continue  # never show a do-not-call business as a lead again
+        results.append({
+            **p.__dict__,
+            "site_status": gp.lead_status(p.website_url),
+            "notes": mine["notes"] if mine else None,
+            "contact_status": mine["contact_status"] if mine else "new",
+            "manual_phone": mine["manual_phone"] if mine else None,
+            "no_site_verified": mine["no_site_verified"] if mine else 0,
+        })
+    return {
+        "results": results, "partial": partial, "calls_used_now": client.calls_made,
+        "calls_this_month": client.calls_this_month(), "limit": client.limit,
+    }
+
+
+@app.patch("/api/google/leads/{place_id}")
+def update_google_lead(place_id: str, body: ContactUpdate, conn=Depends(get_conn)):
+    if not PLACE_ID_RE.match(place_id):
+        raise HTTPException(422, "Μη έγκυρο place_id")
+    with conn:
+        db.update_google_lead(conn, place_id, body.notes, body.contact_status,
+                              body.manual_phone, body.no_site_verified)
+    return {"ok": True}
+
+
 @app.get("/api/filters")
 def filters(conn=Depends(get_conn)):
     return {"areas": db.distinct_values(conn, "area"), "categories": db.distinct_values(conn, "category")}
@@ -168,6 +242,11 @@ def export_csv(f: Filters = Depends(), conn=Depends(get_conn)):
 @app.get("/")
 def index():
     return FileResponse(WEB_DIR / "index.html")
+
+
+@app.get("/google")
+def google_page():
+    return FileResponse(WEB_DIR / "google.html")
 
 
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")

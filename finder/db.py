@@ -33,6 +33,24 @@ CREATE TABLE IF NOT EXISTS businesses (
     UNIQUE (source, source_id)
 );
 
+-- Google Places: we keep ONLY the place_id and our own fields, never Google's content.
+CREATE TABLE IF NOT EXISTS google_leads (
+    place_id TEXT PRIMARY KEY,
+    notes TEXT,
+    contact_status TEXT NOT NULL DEFAULT 'new'
+        CHECK (contact_status IN ('new','called','interested','not_interested','do_not_call')),
+    manual_phone TEXT,
+    no_site_verified INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+-- Billable Google API calls per month (UTC), used for the hard monthly limit.
+CREATE TABLE IF NOT EXISTS api_usage (
+    month TEXT PRIMARY KEY,
+    calls INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS scans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     area TEXT NOT NULL,
@@ -53,7 +71,9 @@ def now() -> str:
 
 
 def connect(path: str | None = None) -> sqlite3.Connection:
-    conn = sqlite3.connect(path or os.getenv("DB_PATH", "site_finder.db"))
+    # check_same_thread=False: FastAPI may run a request's dependency and endpoint on
+    # different worker threads. Each request has its own connection, used one step at a time.
+    conn = sqlite3.connect(path or os.getenv("DB_PATH", "site_finder.db"), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
     migrate(conn)
@@ -230,3 +250,49 @@ def save_check(conn: sqlite3.Connection, business_id: int, site_status: str,
            site_checked_at = ?, updated_at = ? WHERE id = ?""",
         (site_status, http_status, error, now(), now(), business_id),
     )
+
+
+def get_usage(conn: sqlite3.Connection, month: str) -> int:
+    row = conn.execute("SELECT calls FROM api_usage WHERE month = ?", (month,)).fetchone()
+    return row["calls"] if row else 0
+
+
+def add_usage(conn: sqlite3.Connection, month: str, calls: int = 1) -> None:
+    conn.execute(
+        "INSERT INTO api_usage (month, calls) VALUES (?, ?) "
+        "ON CONFLICT(month) DO UPDATE SET calls = calls + excluded.calls",
+        (month, calls),
+    )
+    conn.commit()
+
+
+def get_google_leads(conn: sqlite3.Connection, place_ids: list[str]) -> dict[str, sqlite3.Row]:
+    if not place_ids:
+        return {}
+    marks = ", ".join("?" for _ in place_ids)
+    rows = conn.execute(f"SELECT * FROM google_leads WHERE place_id IN ({marks})", place_ids).fetchall()
+    return {r["place_id"]: r for r in rows}
+
+
+def update_google_lead(conn: sqlite3.Connection, place_id: str, notes: str | None = None,
+                       contact_status: str | None = None, manual_phone: str | None = None,
+                       no_site_verified: bool | None = None) -> None:
+    """Create the row on first edit, then update only the given fields."""
+    stamp = now()
+    conn.execute(
+        "INSERT OR IGNORE INTO google_leads (place_id, created_at, updated_at) VALUES (?, ?, ?)",
+        (place_id, stamp, stamp),
+    )
+    updates = {}
+    if notes is not None:
+        updates["notes"] = notes
+    if contact_status is not None:
+        updates["contact_status"] = contact_status
+    if manual_phone is not None:
+        updates["manual_phone"] = manual_phone.strip() or None
+    if no_site_verified is not None:
+        updates["no_site_verified"] = int(no_site_verified)
+    if updates:
+        updates["updated_at"] = stamp
+        assignments = ", ".join(f"{k} = ?" for k in updates)
+        conn.execute(f"UPDATE google_leads SET {assignments} WHERE place_id = ?", (*updates.values(), place_id))

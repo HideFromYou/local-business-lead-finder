@@ -41,8 +41,11 @@ _last_request = 0.0
 
 def user_agent() -> str:
     ua = "local-business-lead-finder/0.1 (personal tool"
-    contact = os.getenv("OVERPASS_CONTACT")
-    return f"{ua}; {contact})" if contact else f"{ua})"
+    contact = (os.getenv("OVERPASS_CONTACT") or "").strip()
+    # The template value from .env.example is not a real contact: OSM servers block it.
+    if not contact or "example.com" in contact.lower():
+        return f"{ua})"
+    return f"{ua}; {contact})"
 
 
 def _fold(text: str) -> str:
@@ -68,6 +71,11 @@ def _cached_request(method: str, url: str, **kwargs) -> object:
         method, url, headers={"User-Agent": user_agent()}, timeout=90, **kwargs
     )
     _last_request = time.monotonic()
+    if response.status_code in (403, 429):
+        raise httpx.HTTPError(
+            f"Το OpenStreetMap απέρριψε το αίτημα (HTTP {response.status_code}). "
+            "Περίμενε λίγο, και βάλε το πραγματικό email σου στο OVERPASS_CONTACT στο .env."
+        )
     response.raise_for_status()
     payload = response.json()
     CACHE_DIR.mkdir(exist_ok=True)
@@ -97,6 +105,7 @@ def resolve_areas(name: str, hint: str | None = None) -> list[Area]:
             lat=float(r["lat"]),
             lon=float(r["lon"]),
             place_type=r["type"],
+            bbox=tuple(float(x) for x in r["boundingbox"]) if r.get("boundingbox") else None,
         )
         for r in results
     ]

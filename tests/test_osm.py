@@ -55,3 +55,13 @@ def test_parse_element_way_uses_center_and_skips_unnamed():
     assert (b.lat, b.lon) == (1.0, 2.0)
     assert b.website_url == "http://x.gr"
     assert parse_element({"type": "node", "id": 1, "tags": {}}, "A", "cafe") is None
+
+
+def test_user_agent_ignores_placeholder_contact(monkeypatch):
+    from finder.sources.osm import user_agent
+    monkeypatch.setenv("OVERPASS_CONTACT", "you@example.com")
+    assert "example.com" not in user_agent()
+    monkeypatch.setenv("OVERPASS_CONTACT", "me@mydomain.gr")
+    assert "me@mydomain.gr" in user_agent()
+    monkeypatch.delenv("OVERPASS_CONTACT")
+    assert user_agent().endswith("personal tool)")

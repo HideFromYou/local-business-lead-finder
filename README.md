@@ -1,41 +1,41 @@
 # local-business-lead-finder
 
-A personal tool that scans a geographic area and finds local businesses (cafes, shops, pharmacies, ...) that have **no website** or a **dead website**. Those businesses are potential customers for a web developer, so the tool turns public map data into a call list.
+Finds local businesses (cafes, pharmacies, shops, ...) that have **no website** or a **dead website**, so a freelance web developer can phone them and offer to build one. It turns public map data into a call list.
 
-> Status: work in progress (Phase 4 of 5 done). See [Roadmap](#roadmap).
+![Dashboard: search and results on the left, map on the right](docs/screenshot-google.png)
 
-## How it works
+*Screenshot uses fictional demo data. Try it yourself with no API keys: `python scripts/demo_server.py` (see [Demo](#demo)).*
 
-1. **Collect** – for an area and a business category, fetch businesses (name, phone, address, opening hours, website, coordinates) from OpenStreetMap via the Overpass API.
-2. **Filter 1** – no website listed → `site_status = none`.
-3. **Filter 2** – a website is listed → send an HTTP request to check it:
-   - does not respond properly (DNS/TLS/connection error, timeout, 4xx/5xx) → `dead`
-   - only a social page (facebook.com, instagram.com, linktr.ee, ...) → `social_only`
-   - otherwise → `alive` (not a lead)
-4. **Dashboard** – a small web UI listing leads per area and category, with phone numbers (click-to-call), call notes, contact status and CSV export. The UI text is in Greek.
+## Features
+
+- **Two data sources behind one interface**
+  - **OpenStreetMap** (Nominatim + Overpass): free, can be stored; phone numbers are often missing.
+  - **Google Places API (New)**: phone, website, rating and opening hours; shown live and never stored.
+- **Lead classification**: `none` (no website listed), `dead` (DNS/TLS/connection error, timeout, 4xx/5xx), `social_only` (Facebook, Instagram, Linktree, ...), `alive`.
+- **Greek dashboard**, Google-Maps style: results on the left, map on the right. Filters, call notes, contact status, click-to-call, manual phone entry, a "verified: I checked on Google" tick, CSV export (OSM data).
+- **Ambiguous place names** (there are many "Πεύκα" in Greece) show a list of candidates to pick from.
+- **Cost guard** for Google: every request is counted, and a hard monthly limit stops the tool before the free tier ends.
+- **Do-not-call** flag that removes a business from every list.
 
 ## Tech stack
 
-- Python 3.11+, `httpx` (async HTTP), FastAPI + uvicorn, SQLite
-- Plain HTML and a little vanilla JS for the dashboard, no build tooling
-- Config via `.env` (see `.env.example`)
+| Layer | What |
+|---|---|
+| Backend | Python 3.12, FastAPI + uvicorn, `httpx`, SQLite (`sqlite3`), `python-dotenv` |
+| Frontend | Plain HTML, CSS and vanilla JavaScript (no build step), [Leaflet](https://leafletjs.com) for the map |
+| Tests | pytest, with mocked network (no real requests in the test suite) |
 
-## Design notes
-
-- **Polite data access:** descriptive User-Agent, spaced-out requests and local caching of raw Overpass responses, so the public server is not hammered.
-- **Safe checker:** limited concurrency, timeouts and one retry. It only does a normal HTTP request to public websites, with no port scanning or vulnerability probing.
-- **Pluggable sources:** every data source implements the same interface, so Google Places can be added later next to OSM.
-- **Opt-out respected:** a `do_not_call` flag keeps anyone who asks not to be contacted out of the lead list for good.
-- **Missing is not proof:** a business without a website in OSM may still have one, so the dashboard links to a Google search to verify before calling.
-
-## Roadmap
-
-- [x] Phase 0: project skeleton
-- [x] Phase 1: OSM/Overpass source and CLI `scan`
-- [x] Phase 2: SQLite storage and deduplication
-- [x] Phase 3: website checker and CLI `check`
-- [x] Phase 4: FastAPI dashboard with filters, notes and CSV export
-- [ ] Phase 5 (optional): Google Places API as a second source
+```
+finder/
+  sources/          base.py (Area, Business, Source), osm.py, google_places.py
+  checker.py        website liveness check (async httpx, limited concurrency)
+  db.py             schema, migrations, queries
+  api.py            FastAPI app (JSON API + serves web/)
+  cli.py            scan / check / list / serve
+web/                dashboard (index.html = OSM list, google.html = Google + map)
+scripts/            demo_server.py (fictional data)
+tests/
+```
 
 ## Setup
 
@@ -43,37 +43,57 @@ A personal tool that scans a geographic area and finds local businesses (cafes, 
 python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env
+cp .env.example .env      # then edit .env
 pytest
 ```
-
-## Data attribution
-
-Business data © OpenStreetMap contributors, available under the [ODbL](https://opendatacommons.org/licenses/odbl/).
 
 ## Usage
 
 ```
+# OpenStreetMap: collect, check websites, browse
 python -m finder.cli scan --area "Πεύκα" --category cafe --hint Θεσσαλονίκη
-```
-
-Results are saved to SQLite (deduplicated by source and source id; your notes and contact status survive re-scans). Other commands:
-
-```
-python -m finder.cli scan --area "Πεύκα" --category cafe --hint Θεσσαλονίκη --no-save
-python -m finder.cli list --status none
-```
-
-Check the websites of saved businesses (`alive` / `dead` / `social_only`):
-
-```
 python -m finder.cli check
-```
+python -m finder.cli list --status none
 
-Start the dashboard (Greek UI, filters, call notes, CSV export; listens on localhost only):
-
-```
+# Dashboard (listens on localhost only)
 python -m finder.cli serve --port 8765
 ```
 
-If a name matches several places, the candidates are listed and you narrow down with `--hint` or `--pick N`.
+Open `http://127.0.0.1:8765/` (OSM list) or `http://127.0.0.1:8765/google` (Google search with map).
+
+### Google Places (optional)
+
+1. Create a Google Cloud project, enable **Places API (New)** and create an API key restricted to that API.
+2. Put it in `.env`: `GOOGLE_PLACES_API_KEY=...` (never commit it; `.env` is git-ignored).
+3. `GOOGLE_MONTHLY_CALL_LIMIT` (default 900) is the tool's own hard stop. Check current prices at <https://developers.google.com/maps/billing-and-pricing/pricing>.
+
+Google's terms do not allow a permanent copy of their data, so only the `place_id` and your own fields (notes, contact status, phone you typed) are saved.
+
+## Demo
+
+```
+python scripts/demo_server.py
+```
+
+Opens a server with fictional businesses and no network calls to Google or OSM. Visit `http://127.0.0.1:8770/google?q=φαρμακεία&area=Πεύκα&auto=1`.
+
+## Design notes
+
+- **Polite data access**: descriptive User-Agent, spaced-out requests and an on-disk cache of raw Overpass/Nominatim responses.
+- **Safe checker**: timeouts, one retry, limited concurrency. Only ordinary GET requests to public websites: no port scanning, no vulnerability probing.
+- **Security basics**: server bound to `127.0.0.1`; parameterised SQL and a whitelist for sort columns; DOM built with `textContent` (no `innerHTML` with data); only `http(s)` links; CSV cells that start with `=`, `+`, `-`, `@` are escaped against formula injection; API key never appears in error messages.
+- **Missing is not proof**: a business without a website in a data source may still have one, so every result links to a Google search to verify before calling.
+- **Cold-calling note**: these are B2B calls in Greece. If someone asks not to be contacted, mark them `do_not_call`.
+
+## Roadmap
+
+- [x] Phase 0: project skeleton
+- [x] Phase 1: OpenStreetMap source and CLI `scan`
+- [x] Phase 2: SQLite storage and deduplication
+- [x] Phase 3: website checker and CLI `check`
+- [x] Phase 4: FastAPI dashboard
+- [x] Phase 5: Google Places as a second source (tested with mocked responses)
+
+## Data attribution and licences
+
+Business data © OpenStreetMap contributors, available under the [ODbL](https://opendatacommons.org/licenses/odbl/). Map tiles © OpenStreetMap contributors. Place data from Google Places is shown live under Google's terms. [Leaflet](https://leafletjs.com) 1.9.4 (BSD-2-Clause) is vendored in `web/vendor/`.

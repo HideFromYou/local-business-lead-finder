@@ -13,6 +13,7 @@ class Area:
     lat: float
     lon: float
     place_type: str = ""
+    bbox: tuple[float, float, float, float] | None = None  # south, north, west, east
 
     @property
     def has_boundary(self) -> bool:
