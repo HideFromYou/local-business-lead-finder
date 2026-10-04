@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="el">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lead Finder</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Επιχειρήσεις χωρίς site</h1>
+    <span id="count"></span>
+  </header>
+
+  <section class="filters">
+    <label>Περιοχή <select id="area"><option value="">Όλες</option></select></label>
+    <label>Κατηγορία <select id="category"><option value="">Όλες</option></select></label>
+    <label>Κατάσταση site
+      <select id="site_status">
+        <option value="">Όλες</option>
+        <option value="none">Χωρίς site</option>
+        <option value="dead">Νεκρό site</option>
+        <option value="social_only">Μόνο social</option>
+        <option value="alive">Έχει site</option>
+        <option value="unchecked">Μη ελεγμένο</option>
+      </select>
+    </label>
+    <label>Κατάσταση επαφής
+      <select id="contact_status">
+        <option value="">Όλες</option>
+        <option value="new">Νέο</option>
+        <option value="called">Κλήθηκε</option>
+        <option value="interested">Ενδιαφέρεται</option>
+        <option value="not_interested">Δεν ενδιαφέρεται</option>
+        <option value="do_not_call">Να μην καλεστεί</option>
+      </select>
+    </label>
+    <label>Αναζήτηση <input id="q" type="search" placeholder="όνομα, διεύθυνση, τηλέφωνο"></label>
+    <label class="check"><input id="leads_only" type="checkbox" checked> Μόνο leads</label>
+    <a id="export" class="button" href="#">Εξαγωγή CSV</a>
+  </section>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Επιχείρηση</th><th>Τηλέφωνο</th><th>Διεύθυνση</th><th>Ωράριο</th>
+          <th>Site</th><th>Έλεγχος</th><th>Επαφή</th><th>Σημειώσεις</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <p id="empty" hidden>Δεν βρέθηκαν επιχειρήσεις. Τρέξε πρώτα ένα scan από το terminal.</p>
+  </div>
+
+  <footer>© OpenStreetMap contributors</footer>
+  <script src="/static/app.js"></script>
+</body>
+</html>

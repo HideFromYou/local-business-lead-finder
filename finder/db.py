@@ -115,8 +115,14 @@ def save_scan(conn: sqlite3.Connection, area: str, category: str, source: str,
     return counts
 
 
+LEAD_STATUSES = ("none", "dead", "social_only")
+
+
 def list_businesses(conn: sqlite3.Connection, area: str | None = None, category: str | None = None,
-                    site_status: str | None = None, include_do_not_call: bool = False) -> list[sqlite3.Row]:
+                    site_status: str | None = None, contact_status: str | None = None,
+                    search: str | None = None, leads_only: bool = False,
+                    include_do_not_call: bool = False) -> list[sqlite3.Row]:
+    """do_not_call rows are hidden unless asked for explicitly."""
     where, params = [], []
     if area:
         where.append("area = ?"); params.append(area)
@@ -124,12 +130,39 @@ def list_businesses(conn: sqlite3.Connection, area: str | None = None, category:
         where.append("category = ?"); params.append(category)
     if site_status:
         where.append("site_status = ?"); params.append(site_status)
-    if not include_do_not_call:
+    if contact_status:
+        where.append("contact_status = ?"); params.append(contact_status)
+    if leads_only:
+        where.append(f"site_status IN ({', '.join('?' for _ in LEAD_STATUSES)})"); params.extend(LEAD_STATUSES)
+    if search:
+        where.append("(name LIKE ? OR address LIKE ? OR phone LIKE ?)"); params.extend([f"%{search}%"] * 3)
+    if not include_do_not_call and contact_status != "do_not_call":
         where.append("contact_status != 'do_not_call'")
     sql = "SELECT * FROM businesses"
     if where:
         sql += " WHERE " + " AND ".join(where)
     return conn.execute(sql + " ORDER BY area, category, name", params).fetchall()
+
+
+def distinct_values(conn: sqlite3.Connection, column: str) -> list[str]:
+    assert column in ("area", "category")
+    rows = conn.execute(f"SELECT DISTINCT {column} FROM businesses WHERE {column} IS NOT NULL ORDER BY {column}")
+    return [r[0] for r in rows]
+
+
+def update_contact(conn: sqlite3.Connection, business_id: int, notes: str | None,
+                   contact_status: str | None) -> bool:
+    """Update only the fields that are given. Returns False if the business doesn't exist."""
+    updates = {}
+    if notes is not None:
+        updates["notes"] = notes
+    if contact_status is not None:
+        updates["contact_status"] = contact_status
+    if updates:
+        updates["updated_at"] = now()
+        assignments = ", ".join(f"{k} = ?" for k in updates)
+        conn.execute(f"UPDATE businesses SET {assignments} WHERE id = ?", (*updates.values(), business_id))
+    return conn.execute("SELECT 1 FROM businesses WHERE id = ?", (business_id,)).fetchone() is not None
 
 
 def businesses_to_check(conn: sqlite3.Connection, area: str | None = None, category: str | None = None,

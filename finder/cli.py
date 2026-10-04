@@ -73,6 +73,14 @@ def cmd_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    import uvicorn
+
+    print(f"Dashboard: http://127.0.0.1:{args.port}  (Ctrl+C to stop)")
+    uvicorn.run("finder.api:app", host="127.0.0.1", port=args.port)  # localhost only
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     load_dotenv()
     parser = argparse.ArgumentParser(prog="finder")
@@ -100,6 +108,10 @@ def main(argv: list[str] | None = None) -> int:
     chk.add_argument("--concurrency", type=int, default=5, help="requests at once (max 10)")
     chk.add_argument("--yes", action="store_true", help="skip the confirmation for more than 20 sites")
     chk.set_defaults(func=cmd_check)
+
+    srv = sub.add_parser("serve", help="start the dashboard")
+    srv.add_argument("--port", type=int, default=8765)
+    srv.set_defaults(func=cmd_serve)
 
     args = parser.parse_args(argv)
     if args.command == "check":
