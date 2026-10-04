@@ -3,6 +3,7 @@ import sys
 
 from dotenv import load_dotenv
 
+from . import db
 from .sources.osm import CATEGORIES, OsmSource, resolve_areas
 
 
@@ -32,7 +33,21 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
     no_site = sum(1 for b in businesses if not b.website_url)
     print(f"\n{len(businesses)} businesses, {no_site} without a website in OSM.")
+    if not args.no_save:
+        with db.connect() as conn:
+            c = db.save_scan(conn, area.name, args.category, "osm", businesses)
+        print(f"Saved: {c['new']} new, {c['updated']} updated, {c['unchanged']} unchanged.")
     print("Data © OpenStreetMap contributors")
+    return 0
+
+
+def cmd_list(args: argparse.Namespace) -> int:
+    with db.connect() as conn:
+        rows = db.list_businesses(conn, args.area, args.category, args.status)
+    for r in rows:
+        print(f"[{r['site_status']}] {r['name']} | {r['phone'] or '-'} | {r['address'] or '-'} | "
+              f"{r['area']}/{r['category']} | {r['contact_status']}")
+    print(f"\n{len(rows)} businesses (do_not_call hidden).")
     return 0
 
 
@@ -47,7 +62,14 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--hint", help='keep only places whose address contains this, e.g. "Θεσσαλονίκη"')
     scan.add_argument("--pick", type=int, help="choose candidate N when several match")
     scan.add_argument("--radius", type=int, default=1500, help="meters, for places that are only a point")
+    scan.add_argument("--no-save", action="store_true", help="print only, do not write to the database")
     scan.set_defaults(func=cmd_scan)
+
+    ls = sub.add_parser("list", help="show saved businesses")
+    ls.add_argument("--area")
+    ls.add_argument("--category")
+    ls.add_argument("--status", choices=["unchecked", "none", "dead", "social_only", "alive"])
+    ls.set_defaults(func=cmd_list)
 
     args = parser.parse_args(argv)
     try:
