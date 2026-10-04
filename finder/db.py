@@ -130,3 +130,27 @@ def list_businesses(conn: sqlite3.Connection, area: str | None = None, category:
     if where:
         sql += " WHERE " + " AND ".join(where)
     return conn.execute(sql + " ORDER BY area, category, name", params).fetchall()
+
+
+def businesses_to_check(conn: sqlite3.Connection, area: str | None = None, category: str | None = None,
+                        recheck: bool = False) -> list[sqlite3.Row]:
+    where = ["website_url IS NOT NULL", "contact_status != 'do_not_call'"]
+    params: list[str] = []
+    if not recheck:
+        where.append("site_status = 'unchecked'")
+    if area:
+        where.append("area = ?"); params.append(area)
+    if category:
+        where.append("category = ?"); params.append(category)
+    return conn.execute(
+        f"SELECT * FROM businesses WHERE {' AND '.join(where)} ORDER BY id", params
+    ).fetchall()
+
+
+def save_check(conn: sqlite3.Connection, business_id: int, site_status: str,
+               http_status: int | None, error: str | None) -> None:
+    conn.execute(
+        """UPDATE businesses SET site_status = ?, http_status = ?, check_error = ?,
+           site_checked_at = ?, updated_at = ? WHERE id = ?""",
+        (site_status, http_status, error, now(), now(), business_id),
+    )

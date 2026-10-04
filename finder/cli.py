@@ -1,9 +1,11 @@
 import argparse
+import asyncio
 import sys
 
 from dotenv import load_dotenv
 
 from . import db
+from .checker import check_many
 from .sources.osm import CATEGORIES, OsmSource, resolve_areas
 
 
@@ -51,6 +53,26 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_check(args: argparse.Namespace) -> int:
+    with db.connect() as conn:
+        rows = db.businesses_to_check(conn, args.area, args.category, args.recheck)
+        if not rows:
+            print("Nothing to check.")
+            return 0
+        print(f"{len(rows)} websites to check ({args.concurrency} at a time).")
+        if len(rows) > 20 and not args.yes:
+            if input("This sends many requests. Continue? [y/N] ").strip().lower() != "y":
+                return 1
+
+        results = asyncio.run(check_many({r["id"]: r["website_url"] for r in rows}, args.concurrency))
+        with conn:
+            for r in rows:
+                res = results[r["id"]]
+                db.save_check(conn, r["id"], res.site_status, res.http_status, res.error)
+                print(f"[{res.site_status}] {r['name']} | {r['website_url']} | {res.http_status or '-'} | {res.error or ''}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     load_dotenv()
     parser = argparse.ArgumentParser(prog="finder")
@@ -71,7 +93,17 @@ def main(argv: list[str] | None = None) -> int:
     ls.add_argument("--status", choices=["unchecked", "none", "dead", "social_only", "alive"])
     ls.set_defaults(func=cmd_list)
 
+    chk = sub.add_parser("check", help="check the websites of saved businesses")
+    chk.add_argument("--area")
+    chk.add_argument("--category")
+    chk.add_argument("--recheck", action="store_true", help="also re-check already checked sites")
+    chk.add_argument("--concurrency", type=int, default=5, help="requests at once (max 10)")
+    chk.add_argument("--yes", action="store_true", help="skip the confirmation for more than 20 sites")
+    chk.set_defaults(func=cmd_check)
+
     args = parser.parse_args(argv)
+    if args.command == "check":
+        args.concurrency = max(1, min(args.concurrency, 10))
     try:
         return args.func(args)
     except ValueError as e:
