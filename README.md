@@ -79,6 +79,7 @@ Opens a server with fictional businesses and no network calls to Google or OSM. 
 
 ## Design notes
 
+- **IPv4 by default:** some home networks cannot reach Google over IPv6, which makes searches hang. Connections use IPv4 with a short connect timeout (`FORCE_IPV4=0` in `.env` turns that off).
 - **Polite data access**: descriptive User-Agent, spaced-out requests and an on-disk cache of raw Overpass/Nominatim responses.
 - **Safe checker**: timeouts, one retry, limited concurrency. Only ordinary GET requests to public websites: no port scanning, no vulnerability probing.
 - **Security basics**: server bound to `127.0.0.1`; parameterised SQL and a whitelist for sort columns; DOM built with `textContent` (no `innerHTML` with data); only `http(s)` links; CSV cells that start with `=`, `+`, `-`, `@` are escaped against formula injection; API key never appears in error messages.

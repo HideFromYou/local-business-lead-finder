@@ -9,6 +9,7 @@ from pathlib import Path
 
 import httpx
 
+from .. import net
 from .base import Area, Business, Source
 
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
@@ -69,9 +70,8 @@ def _cached_request(method: str, url: str, **kwargs) -> object:
     wait = MIN_SECONDS_BETWEEN_REQUESTS - (time.monotonic() - _last_request)
     if wait > 0:
         time.sleep(wait)
-    response = httpx.request(
-        method, url, headers={"User-Agent": user_agent()}, timeout=90, **kwargs
-    )
+    with httpx.Client(transport=net.transport(), timeout=net.timeout(90)) as client:
+        response = client.request(method, url, headers={"User-Agent": user_agent()}, **kwargs)
     _last_request = time.monotonic()
     if response.status_code in (403, 429):
         raise httpx.HTTPError(

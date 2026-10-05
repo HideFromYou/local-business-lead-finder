@@ -173,6 +173,8 @@ def google_search(body: GoogleSearchIn, conn=Depends(get_conn)):
             places, partial = client.search(body.query, bbox, body.grid)
     except gp.GoogleApiError as e:
         raise HTTPException(502, str(e))
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"Δεν υπήρξε απάντηση από τη Google (πρόβλημα δικτύου: {type(e).__name__}). Δοκίμασε ξανά σε λίγο.")
     if partial and not places:
         raise HTTPException(429, client.stop_reason or f"Έφτασες το μηνιαίο όριο των {client.limit} κλήσεων.")
 

@@ -223,3 +223,24 @@ def test_parse_place_keeps_weekday_lines_and_periods():
     assert parsed.opening_periods[0] == {"open": {"day": 1, "hour": 8, "minute": 0}, "close": {"day": 1, "hour": 21, "minute": 0}}
     assert parsed.opening_periods[1]["close"] is None
     assert gp.parse_place(place(2)).opening_periods is None
+
+
+def test_network_errors_become_a_clear_502_not_a_hang(api, monkeypatch):
+    real = gp.GooglePlacesClient
+    def boom(req):
+        raise httpx.ConnectTimeout("no route")
+    monkeypatch.setattr(gp, "GooglePlacesClient", lambda key, conn, **kw: real(key, conn, transport=httpx.MockTransport(boom), **kw))
+    r = api.post("/api/google/search", json={"query": "οδοντίατρος", "area": AREA})
+    assert r.status_code == 502 and "ConnectTimeout" in r.json()["detail"] and "KEY" not in r.text
+
+
+def test_ipv4_is_forced_by_default_and_can_be_switched_off(monkeypatch):
+    from finder import net
+    seen = []
+    monkeypatch.setattr(net.httpx, "HTTPTransport", lambda **kw: seen.append(kw) or object())
+    monkeypatch.delenv("FORCE_IPV4", raising=False)
+    net.transport()
+    monkeypatch.setenv("FORCE_IPV4", "0")
+    net.transport()
+    assert seen == [{"local_address": "0.0.0.0"}, {}]
+    assert net.timeout().connect == net.CONNECT_TIMEOUT

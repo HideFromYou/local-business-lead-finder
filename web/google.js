@@ -25,13 +25,20 @@ function el(tag, props = {}, ...children) {
   return node;
 }
 
-async function api(url, options) {
-  const res = await fetch(url, options);
-  if (!res.ok) {
-    const detail = await res.json().catch(() => ({}));
-    throw new Error(typeof detail.detail === "string" ? detail.detail : `Σφάλμα ${res.status}`);
-  }
-  return res.json();
+async function api(url, options = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 90000);   // never spin forever
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      throw new Error(typeof detail.detail === "string" ? detail.detail : `Σφάλμα ${res.status}`);
+    }
+    return await res.json();
+  } catch (e) {
+    if (e.name === "AbortError") throw new Error("Η αναζήτηση άργησε πάνω από 90 δευτερόλεπτα. Έλεγξε τη σύνδεσή σου και ξαναδοκίμασε.");
+    throw e;
+  } finally { clearTimeout(timer); }
 }
 
 function setStatus(text, isError = false) {

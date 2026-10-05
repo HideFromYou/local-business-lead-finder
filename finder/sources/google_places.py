@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 import httpx
 
-from .. import db
+from .. import db, net
 from ..checker import is_social, normalize_url
 
 SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
@@ -120,7 +120,7 @@ class GooglePlacesClient:
         self.api_key = api_key
         self.conn = conn
         self.limit = monthly_limit() if limit is None else limit
-        self.http = httpx.Client(timeout=30, transport=transport)
+        self.http = httpx.Client(timeout=net.timeout(), transport=transport or net.transport())
         self.calls_made = 0
         self.call_budget: int | None = None  # optional cap for ONE search (on top of the monthly limit)
         self.stop_reason = ""
