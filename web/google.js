@@ -1,4 +1,4 @@
-const SITE_LABELS = { none: "Χωρίς website", social_only: "Μόνο social", has_site: "Έχει website" };
+const SITE_LABELS = { none: "Χωρίς website στη Google", social_only: "Μόνο social στη Google", has_site: "Έχει website" };
 const BADGE_CLASS = { none: "none", social_only: "social_only", has_site: "alive" };
 const PIN_COLORS = { none: "#dc2626", social_only: "#d97706", has_site: "#16a34a" };
 const CONTACT_LABELS = {
@@ -88,7 +88,9 @@ function contactInput(r, field, placeholder, type) {
   const input = el("input", { type, className: "mini", maxLength: 120, value: r[field] || "", placeholder });
   input.onblur = async () => {
     if (input.value.trim() === (r[field] || "")) return;
-    if (await save(r, { [field]: input.value }, input) && field === "manual_phone") render();
+    if (!(await save(r, { [field]: input.value }, input))) return;
+    if (field === "manual_website") r.site_status = r.manual_website ? "has_site" : r.google_site_status;   // a site you found beats "Google lists none"
+    if (field === "manual_phone" || field === "manual_website") render();
   };
   input.onkeydown = (e) => { if (e.key === "Enter") input.blur(); };
   return input;
@@ -133,6 +135,7 @@ function card(r) {
   const more = el("details", { className: "card-more" },
     el("summary", { textContent: r.no_site_verified ? "Επιβεβαιωμένο ✓ · στοιχεία επαφής" : "Στοιχεία επαφής και σημειώσεις" }),
     el("div", { className: "more-body" },
+      contactInput(r, "manual_website", "website που βρήκες (π.χ. prodent.gr)", "text"),
       contactInput(r, "manual_phone", "τηλέφωνο (δικό σου)", "text"),
       contactInput(r, "manual_email", "email", "email"),
       el("label", { className: "check" }, checkbox, " Έλεγξα στο Google: δεν έχει website"),
@@ -149,6 +152,8 @@ function card(r) {
   if (r.manual_email) item.querySelector(".card-actions").append(
     el("a", { href: "mailto:" + r.manual_email, textContent: r.manual_email, className: "card-meta" }));
   if (href) item.append(el("a", { href, target: "_blank", rel: "noopener noreferrer", className: "card-meta", textContent: r.website_url }));
+  const found = r.manual_website && safeHttpUrl(r.manual_website);
+  if (found) item.append(el("a", { href: found, target: "_blank", rel: "noopener noreferrer", className: "card-meta", textContent: `${r.manual_website} (το βρήκες εσύ)` }));
   item.append(el("div", { className: "card-actions" },
     el("a", { href: googleSearchUrl(r), target: "_blank", rel: "noopener noreferrer", textContent: "Έλεγχος στο Google ↗" }),
     el("a", { href: googleMapsUrl(r), target: "_blank", rel: "noopener noreferrer", textContent: "Google Maps ↗" })));

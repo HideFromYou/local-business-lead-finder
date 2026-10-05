@@ -2,6 +2,7 @@ import csv
 import io
 import os
 import re
+from urllib.parse import urlsplit
 from pathlib import Path
 from typing import Literal
 
@@ -14,7 +15,7 @@ from pydantic import BaseModel, Field
 import httpx
 
 from . import db
-from .checker import check_many
+from .checker import check_many, normalize_url
 from .sources.base import Area
 from .sources import google_places as gp
 from .sources.osm import CATEGORIES, OsmSource, resolve_areas
@@ -141,6 +142,7 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 class GoogleLeadUpdate(ContactUpdate):
     manual_email: str | None = Field(default=None, max_length=120)
+    manual_website: str | None = Field(default=None, max_length=200)
 
 
 PLACE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,200}$")
@@ -184,9 +186,13 @@ def google_search(body: GoogleSearchIn, conn=Depends(get_conn)):
         mine = own.get(p.place_id)
         if mine and mine["contact_status"] == "do_not_call":
             continue  # never show a do-not-call business as a lead again
+        found = (mine["manual_website"] if mine else None) or None
         results.append({
             **p.__dict__,
-            "site_status": gp.lead_status(p.website_url),
+            # a website the user found by hand beats "Google lists none"
+            "site_status": "has_site" if found else gp.lead_status(p.website_url),
+            "manual_website": found,
+            "google_site_status": gp.lead_status(p.website_url),
             "notes": mine["notes"] if mine else None,
             "contact_status": mine["contact_status"] if mine else "new",
             "manual_phone": mine["manual_phone"] if mine else None,
@@ -206,9 +212,16 @@ def update_google_lead(place_id: str, body: GoogleLeadUpdate, conn=Depends(get_c
         raise HTTPException(422, "Μη έγκυρο place_id")
     if body.manual_email and not EMAIL_RE.match(body.manual_email.strip()):
         raise HTTPException(422, "Μη έγκυρο email")
+    website = body.manual_website.strip() if body.manual_website else ""
+    if website:   # the user found a site Google does not list: accept a domain or a URL, nothing else
+        url = normalize_url(website)
+        host = (urlsplit(url).hostname or "") if url else ""
+        if not url or "." not in host or " " in website:
+            raise HTTPException(422, "Μη έγκυρη διεύθυνση website")
     with conn:
         db.update_google_lead(conn, place_id, body.notes, body.contact_status,
-                              body.manual_phone, body.no_site_verified, body.manual_email)
+                              body.manual_phone, body.no_site_verified, body.manual_email,
+                              body.manual_website)
     return {"ok": True}
 
 

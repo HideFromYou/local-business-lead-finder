@@ -244,3 +244,16 @@ def test_ipv4_is_forced_by_default_and_can_be_switched_off(monkeypatch):
     net.transport()
     assert seen == [{"local_address": "0.0.0.0"}, {}]
     assert net.timeout().connect == net.CONNECT_TIMEOUT
+
+
+def test_manual_website_overrides_google_and_is_validated(api, monkeypatch):
+    fake_google(monkeypatch, [place(1)])  # Google lists no website for this place
+    first = api.post("/api/google/search", json={"query": "οδοντίατρος", "area": AREA}).json()["results"][0]
+    assert first["site_status"] == "none" and first["manual_website"] is None
+    assert api.patch("/api/google/leads/pid1", json={"manual_website": "prodent.gr"}).status_code == 200
+    again = api.post("/api/google/search", json={"query": "οδοντίατρος", "area": AREA}).json()["results"][0]
+    assert again["site_status"] == "has_site" and again["manual_website"] == "prodent.gr"
+    assert api.patch("/api/google/leads/pid1", json={"manual_website": "not a site"}).status_code == 422
+    assert api.patch("/api/google/leads/pid1", json={"manual_website": "localhost"}).status_code == 422
+    api.patch("/api/google/leads/pid1", json={"manual_website": ""})  # clearing brings the lead back
+    assert api.post("/api/google/search", json={"query": "οδοντίατρος", "area": AREA}).json()["results"][0]["site_status"] == "none"

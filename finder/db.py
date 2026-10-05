@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS google_leads (
         CHECK (contact_status IN ('new','called','interested','not_interested','do_not_call')),
     manual_phone TEXT,
     manual_email TEXT,
+    manual_website TEXT,
     no_site_verified INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -89,7 +90,7 @@ NEW_COLUMNS = {
 
 def migrate(conn: sqlite3.Connection) -> None:
     """Add columns introduced after a database was first created."""
-    for table, columns in (("businesses", NEW_COLUMNS), ("google_leads", {"manual_email": "TEXT"})):
+    for table, columns in (("businesses", NEW_COLUMNS), ("google_leads", {"manual_email": "TEXT", "manual_website": "TEXT"})):
         existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
         for column, definition in columns.items():
             if column not in existing:
@@ -278,7 +279,8 @@ def get_google_leads(conn: sqlite3.Connection, place_ids: list[str]) -> dict[str
 
 def update_google_lead(conn: sqlite3.Connection, place_id: str, notes: str | None = None,
                        contact_status: str | None = None, manual_phone: str | None = None,
-                       no_site_verified: bool | None = None, manual_email: str | None = None) -> None:
+                       no_site_verified: bool | None = None, manual_email: str | None = None,
+                       manual_website: str | None = None) -> None:
     """Create the row on first edit, then update only the given fields."""
     stamp = now()
     conn.execute(
@@ -294,6 +296,8 @@ def update_google_lead(conn: sqlite3.Connection, place_id: str, notes: str | Non
         updates["manual_phone"] = manual_phone.strip() or None
     if manual_email is not None:
         updates["manual_email"] = manual_email.strip() or None
+    if manual_website is not None:
+        updates["manual_website"] = manual_website.strip() or None
     if no_site_verified is not None:
         updates["no_site_verified"] = int(no_site_verified)
     if updates:
